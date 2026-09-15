@@ -1,0 +1,38 @@
+const express = require('express');
+const healthRoutes = require('./health');
+const authRoutes = require('./auth');
+const userRoutes = require('./user');
+const cityRoutes = require('./city');
+const locationRoutes = require('./location');
+const theaterRoutes = require('./theater');
+const eventTypeRoutes = require('./eventType');
+const addOnRoutes = require('./addOn');
+const bookingRoutes = require('./booking');
+const paymentRoutes = require('./payment');
+const reviewRoutes = require('./review');
+const bannerRoutes = require('./banner');
+const testimonialRoutes = require('./testimonial');
+const faqRoutes = require('./faq');
+const adminRoutes = require('./admin');
+const fileRoutes = require('./file');
+
+const router = express.Router();
+
+router.use(healthRoutes);
+router.use('/files', fileRoutes);
+router.use('/auth', authRoutes);
+router.use('/user', userRoutes);
+router.use('/cities', cityRoutes);
+router.use('/locations', locationRoutes);
+router.use('/theaters', theaterRoutes);
+router.use('/event-types', eventTypeRoutes);
+router.use('/addons', addOnRoutes);
+router.use('/bookings', bookingRoutes);
+router.use('/payment', paymentRoutes);
+router.use('/reviews', reviewRoutes);
+router.use('/banners', bannerRoutes);
+router.use('/testimonials', testimonialRoutes);
+router.use('/faqs', faqRoutes);
+router.use('/admin', adminRoutes);
+
+module.exports = router;

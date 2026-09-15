@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #6c5ce7; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; background: #f9f9f9; }
+    .booking-details { background: white; padding: 15px; margin: 15px 0; border-radius: 5px; }
+    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Booking Confirmed!</h1>
+    </div>
+    <div class="content">
+      <p>Hi {{customerName}},</p>
+      <p>Your booking has been confirmed!</p>
+      <div class="booking-details">
+        <h3>Booking Details</h3>
+        <p><strong>Booking ID:</strong> {{booking.bookingId}}</p>
+        <p><strong>Theater:</strong> {{booking.theater.name}}</p>
+        <p><strong>Date:</strong> {{booking.date}}</p>
+        <p><strong>Time:</strong> {{booking.timeSlot}}</p>
+        <p><strong>Event:</strong> {{booking.eventType.name}}</p>
+        <p><strong>Total Amount:</strong> ₹{{booking.pricing.total}}</p>
+      </div>
+      <p>We look forward to hosting your celebration!</p>
+      <p>Need help? Contact us at {{appConfig.supportEmail}}</p>
+    </div>
+    <div class="footer">
+      <p>&copy; 2026 {{appConfig.brandName}}. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>

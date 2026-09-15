@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #e74c3c; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; background: #f9f9f9; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>Booking Cancelled</h1></div>
+    <div class="content">
+      <p>Your booking <strong>{{booking.bookingId}}</strong> has been cancelled.</p>
+      {{#if booking.cancellationReason}}
+      <p><strong>Reason:</strong> {{booking.cancellationReason}}</p>
+      {{/if}}
+      <p>If you have any questions, please contact {{appConfig.supportEmail}}</p>
+    </div>
+  </div>
+</body>
+</html>

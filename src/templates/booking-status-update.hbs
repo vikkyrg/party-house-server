@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #6c5ce7; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; background: #f9f9f9; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>Booking Status Updated</h1></div>
+    <div class="content">
+      <p>Your booking <strong>{{booking.bookingId}}</strong> status has been updated to <strong>{{newStatus}}</strong>.</p>
+      <p>Date: {{booking.date}} | Time: {{booking.timeSlot}}</p>
+    </div>
+  </div>
+</body>
+</html>

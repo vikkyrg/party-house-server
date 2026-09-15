@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #27ae60; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; background: #f9f9f9; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>Payment Successful</h1></div>
+    <div class="content">
+      <p>Payment received for booking <strong>{{booking.bookingId}}</strong>.</p>
+      <p><strong>Amount Paid:</strong> ₹{{booking.pricing.total}}</p>
+      <p>Your booking is now confirmed. See you soon!</p>
+    </div>
+  </div>
+</body>
+</html>
