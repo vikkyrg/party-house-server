@@ -41,6 +41,14 @@ app.use(hpp());
 app.use('/api', apiLimiter);
 app.use('/api/v1/auth', authLimiter);
 
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Welcome to the Party House API',
+    version: '1.0.0'
+  });
+});
+
 app.get('/health', (_req, res) => {
   res.status(200).json({
     success: true,
