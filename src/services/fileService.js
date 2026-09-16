@@ -24,7 +24,6 @@ const uploadToCloudinary = async (file, folder = 'cs-cinemas') => {
 
   try {
     const mimetype = file.mimetype || 'image/png';
-    const base64Data = `data:${mimetype};base64,${file.buffer.toString('base64')}`;
 
     const newFile = await File.create({
       data: file.buffer,
@@ -34,8 +33,10 @@ const uploadToCloudinary = async (file, folder = 'cs-cinemas') => {
       folder: folder
     });
 
+    const apiUrl = process.env.API_BASE_URL || '/api/v1';
+
     return {
-      url: base64Data,
+      url: `${apiUrl}/files/${newFile._id.toString()}`,
       publicId: newFile._id.toString(),
     };
   } catch (error) {
