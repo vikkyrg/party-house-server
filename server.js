@@ -14,16 +14,19 @@ const startServer = async () => {
 };
 
 startServer().catch((err) => {
+  console.error('FAILED TO START SERVER:', err.stack || err);
   logger.error('Failed to start server', err);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err.stack || err);
   logger.error('Unhandled Rejection', err);
   process.exit(1);
 });
 
 process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err.stack || err);
   logger.error('Uncaught Exception', err);
   process.exit(1);
 });
