@@ -33,10 +33,11 @@ const blacklistToken = (token) => {
 };
 
 const setTokenCookies = (res, accessToken, refreshToken) => {
+  const isProd = process.env.NODE_ENV === 'production';
   const cookieOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
     maxAge: (parseInt(process.env.JWT_COOKIE_EXPIRES_IN, 10) || 30) * 24 * 60 * 60 * 1000,
   };
 
