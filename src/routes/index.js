@@ -13,7 +13,6 @@ const reviewRoutes = require('./review');
 const bannerRoutes = require('./banner');
 const testimonialRoutes = require('./testimonial');
 const faqRoutes = require('./faq');
-const galleryRoutes = require('./gallery');
 const adminRoutes = require('./admin');
 const fileRoutes = require('./file');
 
@@ -34,7 +33,6 @@ router.use('/reviews', reviewRoutes);
 router.use('/banners', bannerRoutes);
 router.use('/testimonials', testimonialRoutes);
 router.use('/faqs', faqRoutes);
-router.use('/gallery', galleryRoutes);
 router.use('/admin', adminRoutes);
 
 module.exports = router;
