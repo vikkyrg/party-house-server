@@ -28,15 +28,11 @@ exports.verifyOtpSchema = Joi.object({
 });
 
 exports.forgotPasswordSchema = Joi.object({
-  phone: Joi.string()
-    .pattern(/^[6-9]\d{9}$/)
-    .required(),
+  email: Joi.string().email().required(),
 });
 
 exports.resetPasswordSchema = Joi.object({
-  phone: Joi.string()
-    .pattern(/^[6-9]\d{9}$/)
-    .required(),
+  email: Joi.string().email().required(),
   otp: Joi.string().length(6).required(),
   password: Joi.string().min(8).pattern(passwordPattern).required(),
 });

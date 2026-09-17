@@ -6,6 +6,7 @@ const { sendSMS } = require('../services/smsService');
 const appConfig = require('../config/app');
 const { generateOTP } = require('../utils/helpers');
 const tokenService = require('../services/tokenService');
+const { sendEmail } = require('../services/emailService');
 const { OTP_EXPIRY_MS } = require('../utils/constants');
 const { createAuditLog } = require('../services/auditService');
 
@@ -175,30 +176,43 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
 });
 
 exports.forgotPassword = catchAsync(async (req, res, next) => {
-  const { phone } = req.body;
-  const user = await User.findOne({ phone });
+  const { email } = req.body;
+  const user = await User.findOne({ email });
   if (!user) {
-    return next(new AppError('No user found with this phone number', 404));
+    return next(new AppError('No user found with this email address', 404));
   }
 
   const otp = generateOTP();
   await OTP.create({
-    phone,
+    email,
     otp,
     purpose: 'password-reset',
     expiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
   });
 
-  await sendSMS(phone, `[${appConfig.brandName}] Your password reset OTP is: ${otp}`);
+  // Send email
+  await sendEmail({
+    to: email,
+    subject: `Password Reset OTP - ${appConfig.brandName}`,
+    html: `
+      <div style="font-family: sans-serif; padding: 20px;">
+        <h2>Password Reset Request</h2>
+        <p>Hello ${user.name},</p>
+        <p>You requested a password reset. Your OTP is:</p>
+        <h1 style="color: #8c5211; letter-spacing: 2px;">${otp}</h1>
+        <p>This code will expire in 10 minutes. If you didn't request this, please ignore this email.</p>
+      </div>
+    `
+  });
 
-  res.json({ success: true, message: 'OTP sent to your phone' });
+  res.json({ success: true, message: 'OTP sent to your email' });
 });
 
 exports.resetPassword = catchAsync(async (req, res, next) => {
-  const { phone, otp, password } = req.body;
+  const { email, otp, password } = req.body;
 
   const otpRecord = await OTP.findOne({
-    phone,
+    email,
     otp,
     purpose: 'password-reset',
     isUsed: false,
@@ -208,7 +222,7 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
     return next(new AppError('Invalid or expired OTP', 400));
   }
 
-  const user = await User.findOne({ phone }).select('+password');
+  const user = await User.findOne({ email }).select('+password');
   if (!user) return next(new AppError('User not found', 404));
 
   user.password = password;
