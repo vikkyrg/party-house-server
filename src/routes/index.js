@@ -15,6 +15,8 @@ const testimonialRoutes = require('./testimonial');
 const faqRoutes = require('./faq');
 const adminRoutes = require('./admin');
 const fileRoutes = require('./file');
+const siteContentRoutes = require('./siteContentRoutes');
+const galleryRoutes = require('./galleryRoutes');
 
 const router = express.Router();
 
@@ -34,5 +36,7 @@ router.use('/banners', bannerRoutes);
 router.use('/testimonials', testimonialRoutes);
 router.use('/faqs', faqRoutes);
 router.use('/admin', adminRoutes);
+router.use('/site-content', siteContentRoutes);
+router.use('/gallery', galleryRoutes);
 
 module.exports = router;
