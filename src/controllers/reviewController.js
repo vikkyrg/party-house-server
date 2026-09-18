@@ -27,14 +27,50 @@ const updateTheaterRating = async (theaterId) => {
   }
 };
 
-exports.getReviews = catchAsync(async (req, res) => {
-  const filter = { isApproved: true };
+exports.getPublicReviews = catchAsync(async (req, res) => {
+  const filter = { $or: [{ isPublished: true }, { isApproved: true }] };
   if (req.query.theater) filter.theater = req.query.theater;
 
   const reviews = await Review.find(filter)
     .populate('user', 'name profileImage')
     .populate('theater', 'name')
     .sort('-createdAt');
+
+  res.json({ success: true, count: reviews.length, data: reviews });
+});
+
+exports.getAdminReviews = catchAsync(async (req, res) => {
+  const reqQuery = { ...req.query };
+  const removeFields = ['select', 'sort', 'page', 'limit', 'search'];
+  removeFields.forEach((param) => delete reqQuery[param]);
+
+  let queryStr = JSON.stringify(reqQuery);
+  queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, (match) => `$${match}`);
+  
+  let query = Review.find(JSON.parse(queryStr))
+    .populate('user', 'name profileImage')
+    .populate('theater', 'name');
+
+  // Search by customerName or user name or comment
+  if (req.query.search) {
+    const searchRegex = new RegExp(req.query.search, 'i');
+    query = query.find({
+      $or: [
+        { customerName: searchRegex },
+        { comment: searchRegex }
+      ]
+    });
+    // Note: Searching populated user name is complex in MongoDB without aggregation.
+  }
+
+  if (req.query.sort) {
+    const sortBy = req.query.sort.split(',').join(' ');
+    query = query.sort(sortBy);
+  } else {
+    query = query.sort('-createdAt');
+  }
+
+  const reviews = await query;
 
   res.json({ success: true, count: reviews.length, data: reviews });
 });
@@ -161,6 +197,63 @@ exports.respondToReview = catchAsync(async (req, res, next) => {
     modelId: review._id,
     changes: { after: { response: review.response.text } },
     req,
+  });
+
+  res.json({ success: true, data: review });
+});
+exports.createAdminReview = catchAsync(async (req, res, next) => {
+  const data = { ...req.body };
+  
+  if (req.file) {
+    const base64Data = req.file.buffer.toString('base64');
+    data.mediaUrl = `data:${req.file.mimetype};base64,${base64Data}`;
+    if (req.file.mimetype.startsWith('video/')) {
+      data.mediaType = 'video';
+    } else {
+      data.mediaType = 'image';
+    }
+  }
+
+  // Convert string booleans if sent via FormData
+  if (data.isPublished === 'true') data.isPublished = true;
+  if (data.isPublished === 'false') data.isPublished = false;
+
+  const review = await Review.create(data);
+
+  res.status(201).json({
+    success: true,
+    data: review,
+  });
+});
+
+exports.updateAdminReview = catchAsync(async (req, res, next) => {
+  let review = await Review.findById(req.params.id);
+  if (!review) return next(new AppError('Review not found', 404));
+
+  const data = { ...req.body };
+
+  if (req.file) {
+    const base64Data = req.file.buffer.toString('base64');
+    data.mediaUrl = `data:${req.file.mimetype};base64,${base64Data}`;
+    if (req.file.mimetype.startsWith('video/')) {
+      data.mediaType = 'video';
+    } else {
+      data.mediaType = 'image';
+    }
+  }
+
+  // Convert string booleans if sent via FormData
+  if (data.isPublished === 'true') data.isPublished = true;
+  if (data.isPublished === 'false') data.isPublished = false;
+
+  // Handle case where admin unsets theater
+  if (data.theater === 'null' || data.theater === '') {
+    data.theater = null;
+  }
+
+  review = await Review.findByIdAndUpdate(req.params.id, data, {
+    new: true,
+    runValidators: true,
   });
 
   res.json({ success: true, data: review });

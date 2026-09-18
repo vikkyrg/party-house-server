@@ -5,18 +5,23 @@ const ReviewSchema = new mongoose.Schema(
     booking: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Booking',
-      required: true,
+      required: false,
       unique: true,
+      sparse: true,
     },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: false,
+    },
+    customerName: {
+      type: String,
+      trim: true,
     },
     theater: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Theater',
-      required: true,
+      required: false,
       index: true,
     },
     rating: {
@@ -30,7 +35,15 @@ const ReviewSchema = new mongoose.Schema(
       required: [true, 'Review comment is required'],
       trim: true,
       minlength: [10, 'Review must be at least 10 characters'],
-      maxlength: [500, 'Review cannot exceed 500 characters'],
+      maxlength: [1500, 'Review cannot exceed 1500 characters'],
+    },
+    mediaType: {
+      type: String,
+      enum: ['none', 'image', 'video', 'link'],
+      default: 'none',
+    },
+    mediaUrl: {
+      type: String, // Holds base64 or external link
     },
     images: [
       {
@@ -39,6 +52,7 @@ const ReviewSchema = new mongoose.Schema(
         alt: String,
       },
     ],
+    isPublished: { type: Boolean, default: false },
     isApproved: { type: Boolean, default: false },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     approvedAt: Date,
