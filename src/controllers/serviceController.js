@@ -1,12 +1,12 @@
-const Gallery = require('../models/Gallery');
+const Service = require('../models/Service');
 const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
 // Removed cloudinary
 
-// @desc    Get all gallery images
-// @route   GET /api/v1/gallery
+// @desc    Get all services
+// @route   GET /api/v1/services
 // @access  Public
-exports.getGalleryImages = asyncHandler(async (req, res, next) => {
+exports.getServices = asyncHandler(async (req, res, next) => {
   const reqQuery = { ...req.query };
   const removeFields = ['select', 'sort', 'page', 'limit'];
   removeFields.forEach((param) => delete reqQuery[param]);
@@ -14,7 +14,7 @@ exports.getGalleryImages = asyncHandler(async (req, res, next) => {
   let queryStr = JSON.stringify(reqQuery);
   queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, (match) => `$${match}`);
   
-  let query = Gallery.find(JSON.parse(queryStr));
+  let query = Service.find(JSON.parse(queryStr));
 
   if (req.query.sort) {
     const sortBy = req.query.sort.split(',').join(' ');
@@ -23,79 +23,85 @@ exports.getGalleryImages = asyncHandler(async (req, res, next) => {
     query = query.sort('sortOrder -createdAt');
   }
 
-  const images = await query;
+  const services = await query;
 
   res.status(200).json({
     success: true,
-    count: images.length,
-    data: images,
+    count: services.length,
+    data: services,
   });
 });
 
-// @desc    Add gallery image
-// @route   POST /api/v1/gallery
+// @desc    Add service
+// @route   POST /api/v1/services
 // @access  Private/Admin
-exports.addGalleryImage = asyncHandler(async (req, res, next) => {
+exports.addService = asyncHandler(async (req, res, next) => {
   if (!req.file && !req.body.image) {
     return next(new ErrorResponse(`Please upload a file`, 400));
   }
 
   const data = { ...req.body };
+  if (data.features && typeof data.features === 'string') {
+    data.features = JSON.parse(data.features);
+  }
 
   if (req.file) {
     const base64Data = req.file.buffer.toString('base64');
     data.image = `data:${req.file.mimetype};base64,${base64Data}`;
   }
 
-  const image = await Gallery.create(data);
+  const service = await Service.create(data);
 
   res.status(201).json({
     success: true,
-    data: image,
+    data: service,
   });
 });
 
-// @desc    Update gallery image
-// @route   PUT /api/v1/gallery/:id
+// @desc    Update service
+// @route   PUT /api/v1/services/:id
 // @access  Private/Admin
-exports.updateGalleryImage = asyncHandler(async (req, res, next) => {
-  let image = await Gallery.findById(req.params.id);
+exports.updateService = asyncHandler(async (req, res, next) => {
+  let service = await Service.findById(req.params.id);
 
-  if (!image) {
-    return next(new ErrorResponse(`Image not found with id of ${req.params.id}`, 404));
+  if (!service) {
+    return next(new ErrorResponse(`Service not found with id of ${req.params.id}`, 404));
   }
 
   const data = { ...req.body };
+  if (data.features && typeof data.features === 'string') {
+    data.features = JSON.parse(data.features);
+  }
 
   if (req.file) {
     const base64Data = req.file.buffer.toString('base64');
     data.image = `data:${req.file.mimetype};base64,${base64Data}`;
   }
 
-  image = await Gallery.findByIdAndUpdate(req.params.id, data, {
+  service = await Service.findByIdAndUpdate(req.params.id, data, {
     new: true,
     runValidators: true,
   });
 
   res.status(200).json({
     success: true,
-    data: image,
+    data: service,
   });
 });
 
-// @desc    Delete gallery image
-// @route   DELETE /api/v1/gallery/:id
+// @desc    Delete service
+// @route   DELETE /api/v1/services/:id
 // @access  Private/Admin
-exports.deleteGalleryImage = asyncHandler(async (req, res, next) => {
-  const image = await Gallery.findById(req.params.id);
+exports.deleteService = asyncHandler(async (req, res, next) => {
+  const service = await Service.findById(req.params.id);
 
-  if (!image) {
-    return next(new ErrorResponse(`Image not found with id of ${req.params.id}`, 404));
+  if (!service) {
+    return next(new ErrorResponse(`Service not found with id of ${req.params.id}`, 404));
   }
 
 
 
-  await image.deleteOne();
+  await service.deleteOne();
 
   res.status(200).json({
     success: true,

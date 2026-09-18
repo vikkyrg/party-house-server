@@ -17,6 +17,8 @@ const adminRoutes = require('./admin');
 const fileRoutes = require('./file');
 const siteContentRoutes = require('./siteContentRoutes');
 const galleryRoutes = require('./galleryRoutes');
+const serviceRoutes = require('./serviceRoutes');
+const storyRoutes = require('./storyRoutes');
 
 const router = express.Router();
 
@@ -38,5 +40,7 @@ router.use('/faqs', faqRoutes);
 router.use('/admin', adminRoutes);
 router.use('/site-content', siteContentRoutes);
 router.use('/gallery', galleryRoutes);
+router.use('/services', serviceRoutes);
+router.use('/stories', storyRoutes);
 
 module.exports = router;

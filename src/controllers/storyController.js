@@ -1,12 +1,12 @@
-const Gallery = require('../models/Gallery');
+const Story = require('../models/Story');
 const ErrorResponse = require('../utils/errorResponse');
 const asyncHandler = require('../middleware/async');
 // Removed cloudinary
 
-// @desc    Get all gallery images
-// @route   GET /api/v1/gallery
+// @desc    Get all stories
+// @route   GET /api/v1/stories
 // @access  Public
-exports.getGalleryImages = asyncHandler(async (req, res, next) => {
+exports.getStories = asyncHandler(async (req, res, next) => {
   const reqQuery = { ...req.query };
   const removeFields = ['select', 'sort', 'page', 'limit'];
   removeFields.forEach((param) => delete reqQuery[param]);
@@ -14,28 +14,28 @@ exports.getGalleryImages = asyncHandler(async (req, res, next) => {
   let queryStr = JSON.stringify(reqQuery);
   queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, (match) => `$${match}`);
   
-  let query = Gallery.find(JSON.parse(queryStr));
+  let query = Story.find(JSON.parse(queryStr));
 
   if (req.query.sort) {
     const sortBy = req.query.sort.split(',').join(' ');
     query = query.sort(sortBy);
   } else {
-    query = query.sort('sortOrder -createdAt');
+    query = query.sort('-publishedAt');
   }
 
-  const images = await query;
+  const stories = await query;
 
   res.status(200).json({
     success: true,
-    count: images.length,
-    data: images,
+    count: stories.length,
+    data: stories,
   });
 });
 
-// @desc    Add gallery image
-// @route   POST /api/v1/gallery
+// @desc    Add story
+// @route   POST /api/v1/stories
 // @access  Private/Admin
-exports.addGalleryImage = asyncHandler(async (req, res, next) => {
+exports.addStory = asyncHandler(async (req, res, next) => {
   if (!req.file && !req.body.image) {
     return next(new ErrorResponse(`Please upload a file`, 400));
   }
@@ -47,22 +47,22 @@ exports.addGalleryImage = asyncHandler(async (req, res, next) => {
     data.image = `data:${req.file.mimetype};base64,${base64Data}`;
   }
 
-  const image = await Gallery.create(data);
+  const story = await Story.create(data);
 
   res.status(201).json({
     success: true,
-    data: image,
+    data: story,
   });
 });
 
-// @desc    Update gallery image
-// @route   PUT /api/v1/gallery/:id
+// @desc    Update story
+// @route   PUT /api/v1/stories/:id
 // @access  Private/Admin
-exports.updateGalleryImage = asyncHandler(async (req, res, next) => {
-  let image = await Gallery.findById(req.params.id);
+exports.updateStory = asyncHandler(async (req, res, next) => {
+  let story = await Story.findById(req.params.id);
 
-  if (!image) {
-    return next(new ErrorResponse(`Image not found with id of ${req.params.id}`, 404));
+  if (!story) {
+    return next(new ErrorResponse(`Story not found with id of ${req.params.id}`, 404));
   }
 
   const data = { ...req.body };
@@ -72,30 +72,30 @@ exports.updateGalleryImage = asyncHandler(async (req, res, next) => {
     data.image = `data:${req.file.mimetype};base64,${base64Data}`;
   }
 
-  image = await Gallery.findByIdAndUpdate(req.params.id, data, {
+  story = await Story.findByIdAndUpdate(req.params.id, data, {
     new: true,
     runValidators: true,
   });
 
   res.status(200).json({
     success: true,
-    data: image,
+    data: story,
   });
 });
 
-// @desc    Delete gallery image
-// @route   DELETE /api/v1/gallery/:id
+// @desc    Delete story
+// @route   DELETE /api/v1/stories/:id
 // @access  Private/Admin
-exports.deleteGalleryImage = asyncHandler(async (req, res, next) => {
-  const image = await Gallery.findById(req.params.id);
+exports.deleteStory = asyncHandler(async (req, res, next) => {
+  const story = await Story.findById(req.params.id);
 
-  if (!image) {
-    return next(new ErrorResponse(`Image not found with id of ${req.params.id}`, 404));
+  if (!story) {
+    return next(new ErrorResponse(`Story not found with id of ${req.params.id}`, 404));
   }
 
 
 
-  await image.deleteOne();
+  await story.deleteOne();
 
   res.status(200).json({
     success: true,

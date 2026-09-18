@@ -10,6 +10,9 @@ const Testimonial = require('../models/Testimonial');
 const FAQ = require('../models/FAQ');
 const Review = require('../models/Review');
 const AuditLog = require('../models/AuditLog');
+const Service = require('../models/Service');
+const Gallery = require('../models/Gallery');
+const Story = require('../models/Story');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const { sendEmail } = require('../services/emailService');
@@ -695,6 +698,63 @@ exports.getAdminReviews = catchAsync(async (req, res) => {
   res.json({
     success: true,
     data: reviews,
+    pagination: { page: parseInt(page, 10), total, totalPages: Math.ceil(total / safeLimit) },
+  });
+});
+
+exports.getAdminServices = catchAsync(async (req, res) => {
+  const { search, page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = req.query;
+  const safeLimit = Math.min(parseInt(limit, 10) || 20, 100);
+  const query = {};
+  if (search) query.title = { $regex: search, $options: 'i' };
+
+  const services = await Service.find(query)
+    .sort({ [sortBy]: order === 'asc' ? 1 : -1 })
+    .limit(safeLimit)
+    .skip((page - 1) * safeLimit);
+  const total = await Service.countDocuments(query);
+
+  res.json({
+    success: true,
+    data: services,
+    pagination: { page: parseInt(page, 10), total, totalPages: Math.ceil(total / safeLimit) },
+  });
+});
+
+exports.getAdminGallery = catchAsync(async (req, res) => {
+  const { search, page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = req.query;
+  const safeLimit = Math.min(parseInt(limit, 10) || 20, 100);
+  const query = {};
+  if (search) query.title = { $regex: search, $options: 'i' };
+
+  const gallery = await Gallery.find(query)
+    .sort({ [sortBy]: order === 'asc' ? 1 : -1 })
+    .limit(safeLimit)
+    .skip((page - 1) * safeLimit);
+  const total = await Gallery.countDocuments(query);
+
+  res.json({
+    success: true,
+    data: gallery,
+    pagination: { page: parseInt(page, 10), total, totalPages: Math.ceil(total / safeLimit) },
+  });
+});
+
+exports.getAdminStories = catchAsync(async (req, res) => {
+  const { search, page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = req.query;
+  const safeLimit = Math.min(parseInt(limit, 10) || 20, 100);
+  const query = {};
+  if (search) query.title = { $regex: search, $options: 'i' };
+
+  const stories = await Story.find(query)
+    .sort({ [sortBy]: order === 'asc' ? 1 : -1 })
+    .limit(safeLimit)
+    .skip((page - 1) * safeLimit);
+  const total = await Story.countDocuments(query);
+
+  res.json({
+    success: true,
+    data: stories,
     pagination: { page: parseInt(page, 10), total, totalPages: Math.ceil(total / safeLimit) },
   });
 });

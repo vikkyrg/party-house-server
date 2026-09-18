@@ -36,6 +36,9 @@ router.get('/banners', adminController.getAdminBanners);
 router.get('/testimonials', adminController.getAdminTestimonials);
 router.get('/faqs', adminController.getAdminFAQs);
 router.get('/reviews', adminController.getAdminReviews);
+router.get('/services', adminController.getAdminServices);
+router.get('/gallery', adminController.getAdminGallery);
+router.get('/stories', adminController.getAdminStories);
 
 // Audit Logs
 router.get('/audit-logs', adminController.getAuditLogs);
