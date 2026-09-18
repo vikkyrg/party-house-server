@@ -228,14 +228,6 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
   let allSlots = [];
   if (theater.slots && theater.slots.length > 0) {
     allSlots = theater.slots.map(s => `${s.startTime} - ${s.endTime}`);
-  } else {
-    // Fallback if theater has no slots configured yet
-    allSlots = [
-      '10:00 AM - 1:00 PM',
-      '2:00 PM - 5:00 PM',
-      '6:00 PM - 9:00 PM',
-      '9:30 PM - 12:30 AM',
-    ];
   }
 
   const booked = bookedSlots.map((b) => b.timeSlot);
