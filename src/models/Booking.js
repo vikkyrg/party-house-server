@@ -25,6 +25,16 @@ const BookingSchema = new mongoose.Schema(
       ref: 'EventType',
       required: [true, 'Event type is required'],
     },
+    cake: {
+      cakeId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Cake'
+      },
+      name: String,
+      size: String,
+      sizeLabel: String,
+      price: { type: Number, default: 0 }
+    },
     addOns: [
       {
         addOn: {
@@ -40,6 +50,7 @@ const BookingSchema = new mongoose.Schema(
     pricing: {
       theaterPrice: { type: Number, required: true },
       addOnsTotal: { type: Number, default: 0 },
+      cakePrice: { type: Number, default: 0 },
       subtotal: { type: Number, required: true },
       tax: { type: Number, default: 0 },
       discount: { type: Number, default: 0 },

@@ -45,7 +45,29 @@ exports.createBooking = catchAsync(async (req, res, next) => {
 
   const theaterPrice = theater.pricePerHour;
   let addOnsTotal = 0;
+  let cakePrice = 0;
+  let processedCake = undefined;
   const processedAddOns = [];
+
+  // Process Cake Selection
+  if (req.body.cake && req.body.cake.cakeId) {
+    const Cake = require('../models/Cake'); // Import here if not at top
+    const cakeDoc = await Cake.findById(req.body.cake.cakeId);
+    
+    if (cakeDoc && cakeDoc.isActive) {
+      const selectedSize = cakeDoc.sizes.find(s => s.name === req.body.cake.size);
+      if (selectedSize) {
+        cakePrice = selectedSize.price;
+        processedCake = {
+          cakeId: cakeDoc._id,
+          name: cakeDoc.name,
+          size: selectedSize.name,
+          sizeLabel: selectedSize.label,
+          price: cakePrice
+        };
+      }
+    }
+  }
 
   if (addOns?.length) {
     for (const addon of addOns) {
@@ -64,7 +86,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     }
   }
 
-  const subtotal = theaterPrice + addOnsTotal;
+  const subtotal = theaterPrice + cakePrice + addOnsTotal;
   const tax = 0; // Using zero tax as per requirement summary
   let discount = 0;
   if (discountCode) discount = subtotal * 0.1;
@@ -80,8 +102,9 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     date: bookingDate,
     timeSlot,
     eventType: eventTypeId,
+    cake: processedCake,
     addOns: processedAddOns,
-    pricing: { theaterPrice, addOnsTotal, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
+    pricing: { theaterPrice, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
     customerDetails: {
       ...customerDetails,
       members,
