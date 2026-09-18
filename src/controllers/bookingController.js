@@ -53,17 +53,10 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       if (addOnDoc?.isActive) {
         let price = addOnDoc.price || 0;
         
-        // Handle variant (e.g. Cake Sizes)
-        if (addon.variantName && addOnDoc.variants?.length > 0) {
-          const variant = addOnDoc.variants.find(v => v.name === addon.variantName);
-          if (variant) price = variant.price;
-        }
-
         const quantity = addon.quantity || 1;
         addOnsTotal += price * quantity;
         processedAddOns.push({
           addOn: addOnDoc._id,
-          variantName: addon.variantName,
           quantity,
           price,
         });
