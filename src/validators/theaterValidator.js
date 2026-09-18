@@ -2,6 +2,7 @@ const Joi = require('joi');
 
 exports.createTheaterSchema = Joi.object({
   name: Joi.string().min(2).max(100).required(),
+  description: Joi.string().allow(''),
   city: Joi.string().hex().length(24).required(),
   location: Joi.string().hex().length(24).required(),
   address: Joi.string().max(500).required(),
@@ -10,6 +11,16 @@ exports.createTheaterSchema = Joi.object({
   pricePerHour: Joi.number().min(0).required(),
   amenities: Joi.array().items(Joi.string()),
   eventTypes: Joi.array().items(Joi.string().hex().length(24)),
+  slots: Joi.alternatives().try(
+    Joi.string(),
+    Joi.array().items(
+      Joi.object({
+        _id: Joi.string().allow(''),
+        startTime: Joi.string().required(),
+        endTime: Joi.string().required(),
+      })
+    )
+  ),
   isActive: Joi.boolean(),
   isFeatured: Joi.boolean(),
   metaTitle: Joi.string(),
