@@ -60,6 +60,12 @@ const TheaterSchema = new mongoose.Schema(
       },
     ],
     eventTypes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'EventType' }],
+    slots: [
+      {
+        startTime: { type: String, required: true },
+        endTime: { type: String, required: true },
+      },
+    ],
     isActive: { type: Boolean, default: true },
     isFeatured: { type: Boolean, default: false },
     rating: { type: Number, default: 0, min: 0, max: 5 },

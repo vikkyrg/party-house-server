@@ -70,12 +70,20 @@ exports.getTheaterAvailability = catchAsync(async (req, res, next) => {
 
   const bookedSlotIds = bookedSlots.map(b => b.timeSlot);
 
-  const standardSlots = [
-    { id: 'morning', time: '10:00 AM – 1:00 PM', available: !bookedSlotIds.includes('morning') },
-    { id: 'afternoon', time: '2:00 PM – 5:00 PM', available: !bookedSlotIds.includes('afternoon') },
-    { id: 'evening', time: '6:00 PM – 9:00 PM', available: !bookedSlotIds.includes('evening') },
-    { id: 'night', time: '9:30 PM – 12:30 AM', available: !bookedSlotIds.includes('night') },
-  ];
+  let standardSlots = [];
+  if (theater.slots && theater.slots.length > 0) {
+    standardSlots = theater.slots.map(s => {
+      const slotStr = `${s.startTime} - ${s.endTime}`;
+      return { id: slotStr, time: slotStr, available: !bookedSlotIds.includes(slotStr) };
+    });
+  } else {
+    standardSlots = [
+      { id: '10:00 AM - 1:00 PM', time: '10:00 AM - 1:00 PM', available: !bookedSlotIds.includes('10:00 AM - 1:00 PM') },
+      { id: '2:00 PM - 5:00 PM', time: '2:00 PM - 5:00 PM', available: !bookedSlotIds.includes('2:00 PM - 5:00 PM') },
+      { id: '6:00 PM - 9:00 PM', time: '6:00 PM - 9:00 PM', available: !bookedSlotIds.includes('6:00 PM - 9:00 PM') },
+      { id: '9:30 PM - 12:30 AM', time: '9:30 PM - 12:30 AM', available: !bookedSlotIds.includes('9:30 PM - 12:30 AM') },
+    ];
+  }
 
   res.json({ success: true, data: { theater: theater.name, date: bookingDate, slots: standardSlots } });
 });

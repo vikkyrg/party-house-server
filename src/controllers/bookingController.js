@@ -21,18 +21,26 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     return next(new AppError('Theater not found or inactive', 404));
   }
 
+  // Validate Capacity
+  const members = parseInt(customerDetails.members || 1, 10);
+  const kids = parseInt(customerDetails.kids || 0, 10);
+  if (members + kids > theater.capacity) {
+    return next(new AppError(`Guest count (${members + kids}) exceeds theater capacity of ${theater.capacity}.`, 400));
+  }
+
   const bookingDate = new Date(date);
   bookingDate.setHours(0, 0, 0, 0);
 
+  // Prevent Double Booking
   const existingBooking = await Booking.findOne({
     theater: theaterId,
     date: bookingDate,
     timeSlot,
-    status: { $nin: ['cancelled', 'no-show'] },
+    status: { $nin: ['cancelled', 'no-show', 'failed'] },
   });
 
   if (existingBooking) {
-    return next(new AppError('This time slot is already booked', 400));
+    return next(new AppError('Sorry, this slot is no longer available. Please select another time.', 400));
   }
 
   const theaterPrice = theater.pricePerHour;
@@ -41,25 +49,36 @@ exports.createBooking = catchAsync(async (req, res, next) => {
 
   if (addOns?.length) {
     for (const addon of addOns) {
-      const addOnDoc = await AddOn.findById(addon.addOnId);
+      const addOnDoc = await AddOn.findById(addon.id);
       if (addOnDoc?.isActive) {
+        let price = addOnDoc.price || 0;
+        
+        // Handle variant (e.g. Cake Sizes)
+        if (addon.variantName && addOnDoc.variants?.length > 0) {
+          const variant = addOnDoc.variants.find(v => v.name === addon.variantName);
+          if (variant) price = variant.price;
+        }
+
         const quantity = addon.quantity || 1;
-        addOnsTotal += addOnDoc.price * quantity;
+        addOnsTotal += price * quantity;
         processedAddOns.push({
           addOn: addOnDoc._id,
+          variantName: addon.variantName,
           quantity,
-          price: addOnDoc.price,
+          price,
         });
       }
     }
   }
 
   const subtotal = theaterPrice + addOnsTotal;
-  const tax = subtotal * GST_RATE;
+  const tax = 0; // Using zero tax as per requirement summary
   let discount = 0;
   if (discountCode) discount = subtotal * 0.1;
 
   const total = subtotal + tax - discount;
+  const advanceAmount = 750;
+  const balanceAmount = total > advanceAmount ? total - advanceAmount : 0;
 
   const booking = await Booking.create({
     user: req.user._id,
@@ -69,31 +88,35 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     timeSlot,
     eventType: eventTypeId,
     addOns: processedAddOns,
-    pricing: { theaterPrice, addOnsTotal, subtotal, tax, discount, discountCode, total },
-    customerDetails,
+    pricing: { theaterPrice, addOnsTotal, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
+    customerDetails: {
+      ...customerDetails,
+      members,
+      kids
+    },
     status: 'pending',
   });
 
   await booking.populate([
     { path: 'theater', select: 'name images address' },
     { path: 'eventType', select: 'name' },
-    { path: 'addOns.addOn', select: 'name price' },
+    { path: 'addOns.addOn', select: 'name price category' },
   ]);
 
   await User.findByIdAndUpdate(req.user._id, { $push: { bookings: booking._id } });
   await Theater.findByIdAndUpdate(theaterId, { $inc: { totalBookings: 1 } });
 
-  await sendEmail({
-    to: customerDetails.email,
-    subject: `Booking Confirmation - ${booking.bookingId}`,
-    template: 'booking-confirmation',
-    data: { booking, customerName: customerDetails.name },
-  });
-
-  await sendSMS(
-    customerDetails.phone,
-    `[${appConfig.brandName}] Booking confirmed! ID: ${booking.bookingId}. Theater: ${theater.name}. Date: ${bookingDate.toLocaleDateString()}`
-  );
+  // Do not send SMS/Email until payment is complete (handled elsewhere), but left here to preserve existing flow
+  try {
+    await sendEmail({
+      to: customerDetails.email,
+      subject: `Booking Request Initiated - ${booking.bookingId}`,
+      template: 'booking-confirmation',
+      data: { booking, customerName: customerDetails.name },
+    });
+  } catch(err) {
+     logger.error('Failed to send email:', err);
+  }
 
   res.status(201).json({
     success: true,
@@ -110,7 +133,7 @@ exports.getUserBookings = catchAsync(async (req, res) => {
     .sort({ createdAt: -1 })
     .populate('theater', 'name images city')
     .populate('eventType', 'name')
-    .populate('addOns.addOn', 'name price');
+    .populate('addOns.addOn', 'name price category');
 
   res.json({ success: true, count: bookings.length, data: bookings });
 });
@@ -128,7 +151,7 @@ exports.getBooking = catchAsync(async (req, res, next) => {
   const booking = await Booking.findById(req.params.id)
     .populate('theater', 'name images address city location')
     .populate('eventType', 'name')
-    .populate('addOns.addOn', 'name price')
+    .populate('addOns.addOn', 'name price category')
     .populate('user', 'name email phone');
 
   if (!booking) return next(new AppError('Booking not found', 404));
@@ -172,33 +195,48 @@ exports.cancelBooking = catchAsync(async (req, res, next) => {
 
   await booking.save();
 
-  await sendEmail({
-    to: booking.customerDetails.email,
-    subject: `Booking Cancelled - ${booking.bookingId}`,
-    template: 'booking-cancelled',
-    data: { booking },
-  });
+  try {
+    await sendEmail({
+      to: booking.customerDetails.email,
+      subject: `Booking Cancelled - ${booking.bookingId}`,
+      template: 'booking-cancelled',
+      data: { booking },
+    });
+  } catch (err) {
+    logger.error('Failed to send cancellation email', err);
+  }
 
   res.json({ success: true, message: 'Booking cancelled successfully', data: booking });
 });
 
-exports.checkAvailability = catchAsync(async (req, res) => {
+exports.checkAvailability = catchAsync(async (req, res, next) => {
   const { theaterId, date } = req.query;
   const bookingDate = new Date(date);
   bookingDate.setHours(0, 0, 0, 0);
 
+  const theater = await Theater.findById(theaterId);
+  if (!theater) {
+    return next(new AppError('Theater not found', 404));
+  }
+
   const bookedSlots = await Booking.find({
     theater: theaterId,
     date: bookingDate,
-    status: { $nin: ['cancelled', 'no-show'] },
+    status: { $nin: ['cancelled', 'no-show', 'failed'] },
   }).select('timeSlot');
 
-  const allSlots = [
-    '10:00 AM - 1:00 PM',
-    '2:00 PM - 5:00 PM',
-    '6:00 PM - 9:00 PM',
-    '9:30 PM - 12:30 AM',
-  ];
+  let allSlots = [];
+  if (theater.slots && theater.slots.length > 0) {
+    allSlots = theater.slots.map(s => `${s.startTime} - ${s.endTime}`);
+  } else {
+    // Fallback if theater has no slots configured yet
+    allSlots = [
+      '10:00 AM - 1:00 PM',
+      '2:00 PM - 5:00 PM',
+      '6:00 PM - 9:00 PM',
+      '9:30 PM - 12:30 AM',
+    ];
+  }
 
   const booked = bookedSlots.map((b) => b.timeSlot);
   const available = allSlots.filter((slot) => !booked.includes(slot));

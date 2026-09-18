@@ -11,15 +11,20 @@ const AddOnSchema = new mongoose.Schema(
     slug: { type: String, lowercase: true, unique: true },
     category: {
       type: String,
-      enum: ['Food', 'Decoration', 'Experience', 'Gift', 'Entertainment'],
+      enum: ['Food', 'Decoration', 'Experience', 'Gift', 'Entertainment', 'Cake', 'Special Service'],
       required: [true, 'Category is required'],
     },
     description: { type: String, maxlength: 500 },
     price: {
       type: Number,
-      required: [true, 'Price is required'],
       min: [0, 'Price cannot be negative'],
     },
+    variants: [
+      {
+        name: { type: String, required: true },
+        price: { type: Number, required: true },
+      },
+    ],
     image: {
       url: String,
       publicId: String,

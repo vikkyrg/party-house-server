@@ -32,6 +32,7 @@ const BookingSchema = new mongoose.Schema(
           ref: 'AddOn',
           required: true,
         },
+        variantName: String,
         quantity: { type: Number, default: 1, min: 1 },
         price: { type: Number, required: true },
       },
@@ -44,11 +45,15 @@ const BookingSchema = new mongoose.Schema(
       discount: { type: Number, default: 0 },
       discountCode: String,
       total: { type: Number, required: true },
+      advanceAmount: { type: Number, default: 750 },
+      balanceAmount: { type: Number, required: true },
     },
     customerDetails: {
       name: { type: String, required: true, trim: true },
       phone: { type: String, required: true },
       email: { type: String, required: true, lowercase: true },
+      members: { type: Number, required: true, min: 1 },
+      kids: { type: Number, default: 0, min: 0 },
       specialRequests: { type: String, maxlength: 500 },
     },
     payment: {
