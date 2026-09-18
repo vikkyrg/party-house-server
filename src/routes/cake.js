@@ -1,7 +1,7 @@
 const express = require('express');
 const cakeController = require('../controllers/cakeController');
-const { protect, restrictTo } = require('../controllers/authController');
-const { uploadMemory } = require('../middleware/uploadMiddleware');
+const { protect, restrictTo } = require('../middleware/auth');
+const { uploadSingle } = require('../middleware/upload');
 
 const router = express.Router();
 
@@ -13,8 +13,8 @@ router.get('/:id', cakeController.getCake);
 router.use(protect);
 router.use(restrictTo('admin', 'super-admin'));
 
-router.post('/', uploadMemory.single('image'), cakeController.createCake);
-router.put('/:id', uploadMemory.single('image'), cakeController.updateCake);
+router.post('/', uploadSingle('image'), cakeController.createCake);
+router.put('/:id', uploadSingle('image'), cakeController.updateCake);
 router.delete('/:id', cakeController.deleteCake);
 
 module.exports = router;
