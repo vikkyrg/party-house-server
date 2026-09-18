@@ -102,6 +102,14 @@ exports.getTheaterReviews = catchAsync(async (req, res, next) => {
 exports.createTheater = catchAsync(async (req, res) => {
   const theaterData = { ...req.body };
 
+  if (typeof theaterData.slots === 'string') {
+    try {
+      theaterData.slots = JSON.parse(theaterData.slots);
+    } catch (err) {
+      theaterData.slots = [];
+    }
+  }
+
   if (req.files?.length) {
     theaterData.images = [];
     for (const file of req.files) {
@@ -129,6 +137,15 @@ exports.updateTheater = catchAsync(async (req, res, next) => {
   if (!theater) return next(new AppError('Theater not found', 404));
 
   const before = theater.toObject();
+  
+  if (typeof req.body.slots === 'string') {
+    try {
+      req.body.slots = JSON.parse(req.body.slots);
+    } catch (err) {
+      req.body.slots = [];
+    }
+  }
+
   Object.assign(theater, req.body);
 
   if (req.files?.length) {
