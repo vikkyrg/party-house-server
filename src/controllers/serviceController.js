@@ -1,12 +1,12 @@
 const Service = require('../models/Service');
-const ErrorResponse = require('../utils/errorResponse');
-const asyncHandler = require('../middleware/async');
+const AppError = require('../utils/AppError');
+const catchAsync = require('../utils/catchAsync');
 // Removed cloudinary
 
 // @desc    Get all services
 // @route   GET /api/v1/services
 // @access  Public
-exports.getServices = asyncHandler(async (req, res, next) => {
+exports.getServices = catchAsync(async (req, res, next) => {
   const reqQuery = { ...req.query };
   const removeFields = ['select', 'sort', 'page', 'limit'];
   removeFields.forEach((param) => delete reqQuery[param]);
@@ -35,9 +35,9 @@ exports.getServices = asyncHandler(async (req, res, next) => {
 // @desc    Add service
 // @route   POST /api/v1/services
 // @access  Private/Admin
-exports.addService = asyncHandler(async (req, res, next) => {
+exports.addService = catchAsync(async (req, res, next) => {
   if (!req.file && !req.body.image) {
-    return next(new ErrorResponse(`Please upload a file`, 400));
+    return next(new AppError(`Please upload a file`, 400));
   }
 
   const data = { ...req.body };
@@ -61,11 +61,11 @@ exports.addService = asyncHandler(async (req, res, next) => {
 // @desc    Update service
 // @route   PUT /api/v1/services/:id
 // @access  Private/Admin
-exports.updateService = asyncHandler(async (req, res, next) => {
+exports.updateService = catchAsync(async (req, res, next) => {
   let service = await Service.findById(req.params.id);
 
   if (!service) {
-    return next(new ErrorResponse(`Service not found with id of ${req.params.id}`, 404));
+    return next(new AppError(`Service not found with id of ${req.params.id}`, 404));
   }
 
   const data = { ...req.body };
@@ -92,11 +92,11 @@ exports.updateService = asyncHandler(async (req, res, next) => {
 // @desc    Delete service
 // @route   DELETE /api/v1/services/:id
 // @access  Private/Admin
-exports.deleteService = asyncHandler(async (req, res, next) => {
+exports.deleteService = catchAsync(async (req, res, next) => {
   const service = await Service.findById(req.params.id);
 
   if (!service) {
-    return next(new ErrorResponse(`Service not found with id of ${req.params.id}`, 404));
+    return next(new AppError(`Service not found with id of ${req.params.id}`, 404));
   }
 
 

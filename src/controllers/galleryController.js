@@ -1,12 +1,12 @@
 const Gallery = require('../models/Gallery');
-const ErrorResponse = require('../utils/errorResponse');
-const asyncHandler = require('../middleware/async');
+const AppError = require('../utils/AppError');
+const catchAsync = require('../utils/catchAsync');
 // Removed cloudinary
 
 // @desc    Get all gallery images
 // @route   GET /api/v1/gallery
 // @access  Public
-exports.getGalleryImages = asyncHandler(async (req, res, next) => {
+exports.getGalleryImages = catchAsync(async (req, res, next) => {
   const reqQuery = { ...req.query };
   const removeFields = ['select', 'sort', 'page', 'limit'];
   removeFields.forEach((param) => delete reqQuery[param]);
@@ -35,9 +35,9 @@ exports.getGalleryImages = asyncHandler(async (req, res, next) => {
 // @desc    Add gallery image
 // @route   POST /api/v1/gallery
 // @access  Private/Admin
-exports.addGalleryImage = asyncHandler(async (req, res, next) => {
+exports.addGalleryImage = catchAsync(async (req, res, next) => {
   if (!req.file && !req.body.image) {
-    return next(new ErrorResponse(`Please upload a file`, 400));
+    return next(new AppError(`Please upload a file`, 400));
   }
 
   const data = { ...req.body };
@@ -58,11 +58,11 @@ exports.addGalleryImage = asyncHandler(async (req, res, next) => {
 // @desc    Update gallery image
 // @route   PUT /api/v1/gallery/:id
 // @access  Private/Admin
-exports.updateGalleryImage = asyncHandler(async (req, res, next) => {
+exports.updateGalleryImage = catchAsync(async (req, res, next) => {
   let image = await Gallery.findById(req.params.id);
 
   if (!image) {
-    return next(new ErrorResponse(`Image not found with id of ${req.params.id}`, 404));
+    return next(new AppError(`Image not found with id of ${req.params.id}`, 404));
   }
 
   const data = { ...req.body };
@@ -86,11 +86,11 @@ exports.updateGalleryImage = asyncHandler(async (req, res, next) => {
 // @desc    Delete gallery image
 // @route   DELETE /api/v1/gallery/:id
 // @access  Private/Admin
-exports.deleteGalleryImage = asyncHandler(async (req, res, next) => {
+exports.deleteGalleryImage = catchAsync(async (req, res, next) => {
   const image = await Gallery.findById(req.params.id);
 
   if (!image) {
-    return next(new ErrorResponse(`Image not found with id of ${req.params.id}`, 404));
+    return next(new AppError(`Image not found with id of ${req.params.id}`, 404));
   }
 
 

@@ -1,12 +1,12 @@
 const Story = require('../models/Story');
-const ErrorResponse = require('../utils/errorResponse');
-const asyncHandler = require('../middleware/async');
+const AppError = require('../utils/AppError');
+const catchAsync = require('../utils/catchAsync');
 // Removed cloudinary
 
 // @desc    Get all stories
 // @route   GET /api/v1/stories
 // @access  Public
-exports.getStories = asyncHandler(async (req, res, next) => {
+exports.getStories = catchAsync(async (req, res, next) => {
   const reqQuery = { ...req.query };
   const removeFields = ['select', 'sort', 'page', 'limit'];
   removeFields.forEach((param) => delete reqQuery[param]);
@@ -35,9 +35,9 @@ exports.getStories = asyncHandler(async (req, res, next) => {
 // @desc    Add story
 // @route   POST /api/v1/stories
 // @access  Private/Admin
-exports.addStory = asyncHandler(async (req, res, next) => {
+exports.addStory = catchAsync(async (req, res, next) => {
   if (!req.file && !req.body.image) {
-    return next(new ErrorResponse(`Please upload a file`, 400));
+    return next(new AppError(`Please upload a file`, 400));
   }
 
   const data = { ...req.body };
@@ -58,11 +58,11 @@ exports.addStory = asyncHandler(async (req, res, next) => {
 // @desc    Update story
 // @route   PUT /api/v1/stories/:id
 // @access  Private/Admin
-exports.updateStory = asyncHandler(async (req, res, next) => {
+exports.updateStory = catchAsync(async (req, res, next) => {
   let story = await Story.findById(req.params.id);
 
   if (!story) {
-    return next(new ErrorResponse(`Story not found with id of ${req.params.id}`, 404));
+    return next(new AppError(`Story not found with id of ${req.params.id}`, 404));
   }
 
   const data = { ...req.body };
@@ -86,11 +86,11 @@ exports.updateStory = asyncHandler(async (req, res, next) => {
 // @desc    Delete story
 // @route   DELETE /api/v1/stories/:id
 // @access  Private/Admin
-exports.deleteStory = asyncHandler(async (req, res, next) => {
+exports.deleteStory = catchAsync(async (req, res, next) => {
   const story = await Story.findById(req.params.id);
 
   if (!story) {
-    return next(new ErrorResponse(`Story not found with id of ${req.params.id}`, 404));
+    return next(new AppError(`Story not found with id of ${req.params.id}`, 404));
   }
 
 
