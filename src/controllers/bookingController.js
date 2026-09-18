@@ -3,6 +3,7 @@ const Booking = require('../models/Booking');
 const invoiceService = require('../services/invoiceService');
 const logger = require('../utils/logger');
 const Theater = require('../models/Theater');
+const Cake = require('../models/Cake');
 const AddOn = require('../models/AddOn');
 const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
@@ -38,6 +39,15 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     return next(new AppError('The selected time slot is not available for this theater.', 400));
   }
 
+  let selectedCake = null;
+  if (req.body.cake) {
+    selectedCake = await Cake.findOne({ _id: req.body.cake.cakeId, isActive: true });
+    if (!selectedCake) return next(new AppError('The selected cake is no longer available.', 400));
+    const selectedSize = selectedCake.sizes.find((size) => size.name === req.body.cake.size);
+    if (!selectedSize) return next(new AppError('The selected cake size is no longer available.', 400));
+    selectedCake = { document: selectedCake, size: selectedSize };
+  }
+
   // Prevent Double Booking
   const existingBooking = await Booking.findOne({
     theater: theaterId,
@@ -57,28 +67,20 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   const processedAddOns = [];
 
   // Process Cake Selection
-  if (req.body.cake && req.body.cake.cakeId) {
-    const Cake = require('../models/Cake'); // Import here if not at top
-    const cakeDoc = await Cake.findById(req.body.cake.cakeId);
-    
-    if (cakeDoc && cakeDoc.isActive) {
-      const selectedSize = cakeDoc.sizes.find(s => s.name === req.body.cake.size);
-      if (selectedSize) {
-        cakePrice = selectedSize.price;
-        processedCake = {
-          cakeId: cakeDoc._id,
-          name: cakeDoc.name,
-          size: selectedSize.name,
-          sizeLabel: selectedSize.label,
-          price: cakePrice
-        };
-      }
-    }
+  if (selectedCake) {
+    cakePrice = selectedCake.size.price;
+    processedCake = {
+      cakeId: selectedCake.document._id,
+      name: selectedCake.document.name,
+      size: selectedCake.size.name,
+      sizeLabel: selectedCake.size.label,
+      price: cakePrice
+    };
   }
 
   if (addOns?.length) {
     for (const addon of addOns) {
-      const addOnDoc = await AddOn.findById(addon.id);
+      const addOnDoc = await AddOn.findById(addon.id || addon.addOnId);
       if (addOnDoc?.isActive) {
         let price = addOnDoc.price || 0;
         

@@ -16,6 +16,12 @@ const cakeSchema = new mongoose.Schema({
     type: String,
     maxlength: 500,
   },
+  category: {
+    type: String,
+    enum: ['standard', 'premium'],
+    default: 'standard',
+    index: true,
+  },
   image: {
     url: String, // fallback for any existing pattern
     data: String,       // base64 raw data
@@ -30,7 +36,11 @@ const cakeSchema = new mongoose.Schema({
         },
         message: 'At least one cake size must be provided'
       }
-    ]
+    ],
+    validate: {
+      validator: (sizes) => new Set(sizes.map((size) => size.name.trim().toLowerCase())).size === sizes.length,
+      message: 'Cake sizes must be unique'
+    }
   },
   sortOrder: {
     type: Number,

@@ -3,10 +3,34 @@ const Booking = require('../models/Booking');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const { createAuditLog } = require('../services/auditService');
-const { uploadToCloudinary, deleteFromCloudinary } = require('../services/fileService');
+const normalizeCategory = (category) => category === 'premium' ? 'premium' : 'standard';
+
+const parseCakeBody = (body) => {
+  const cakeData = { ...body };
+  if (typeof cakeData.sizes === 'string') {
+    try {
+      cakeData.sizes = JSON.parse(cakeData.sizes);
+    } catch {
+      cakeData.sizes = [];
+    }
+  }
+  cakeData.category = normalizeCategory(cakeData.category);
+  if (typeof cakeData.isActive === 'string') cakeData.isActive = cakeData.isActive !== 'false';
+  if (cakeData.sizes && !Array.isArray(cakeData.sizes)) cakeData.sizes = [];
+  return cakeData;
+};
+
+const storeRawImage = (file, name) => {
+  const data = file.buffer.toString('base64');
+  return { url: `data:${file.mimetype};base64,${data}`, data, contentType: file.mimetype, alt: name };
+};
 
 exports.getCakes = catchAsync(async (req, res) => {
   const filter = req.query.includeInactive ? {} : { isActive: true };
+  if (req.query.category === 'premium') filter.category = 'premium';
+  if (req.query.category === 'standard') {
+    filter.$or = [{ category: 'standard' }, { category: { $exists: false } }];
+  }
 
   const cakes = await Cake.find(filter).sort('sortOrder');
   res.json({ success: true, count: cakes.length, data: cakes });
@@ -19,10 +43,9 @@ exports.getCake = catchAsync(async (req, res, next) => {
 });
 
 exports.createCake = catchAsync(async (req, res) => {
-  const cakeData = { ...req.body };
+  const cakeData = parseCakeBody(req.body);
   if (req.file) {
-    const uploaded = await uploadToCloudinary(req.file, 'cakes');
-    cakeData.image = { url: uploaded.url, publicId: uploaded.publicId, alt: cakeData.name };
+    cakeData.image = storeRawImage(req.file, cakeData.name);
   } else if (cakeData.image && typeof cakeData.image === 'string' && cakeData.image.startsWith('data:')) {
     cakeData.image = { url: cakeData.image, publicId: 'raw_' + Date.now(), alt: cakeData.name };
   }
@@ -45,11 +68,9 @@ exports.updateCake = catchAsync(async (req, res, next) => {
   const existing = await Cake.findById(req.params.id);
   if (!existing) return next(new AppError('Cake not found', 404));
 
-  const updateData = { ...req.body };
+  const updateData = parseCakeBody(req.body);
   if (req.file) {
-    if (existing.image?.publicId) await deleteFromCloudinary(existing.image.publicId);
-    const uploaded = await uploadToCloudinary(req.file, 'cakes');
-    updateData.image = { url: uploaded.url, publicId: uploaded.publicId, alt: updateData.name || existing.name };
+    updateData.image = storeRawImage(req.file, updateData.name || existing.name);
   } else if (updateData.image && typeof updateData.image === 'string' && updateData.image.startsWith('data:')) {
     updateData.image = { url: updateData.image, publicId: 'raw_' + Date.now(), alt: updateData.name || existing.name };
   }
