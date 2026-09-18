@@ -146,7 +146,8 @@ exports.updateTheater = catchAsync(async (req, res, next) => {
     }
   }
 
-  Object.assign(theater, req.body);
+  // Use .set() to ensure Mongoose correctly merges arrays and objects
+  theater.set(req.body);
 
   if (req.files?.length) {
     for (const file of req.files) {
