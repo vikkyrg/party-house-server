@@ -100,6 +100,15 @@ const BookingSchema = new mongoose.Schema(
 );
 
 BookingSchema.index({ theater: 1, date: 1 });
+BookingSchema.index(
+  { theater: 1, date: 1, timeSlot: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $in: ['pending', 'confirmed', 'in-progress', 'completed'] },
+    },
+  }
+);
 BookingSchema.index({ user: 1, createdAt: -1 });
 BookingSchema.index({ status: 1, date: 1 });
 BookingSchema.index({ 'payment.status': 1, createdAt: -1 });

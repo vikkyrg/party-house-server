@@ -31,6 +31,13 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   const bookingDate = new Date(date);
   bookingDate.setHours(0, 0, 0, 0);
 
+  const configuredSlots = (theater.slots || []).map(
+    (slot) => `${slot.startTime} - ${slot.endTime}`
+  );
+  if (!configuredSlots.includes(timeSlot)) {
+    return next(new AppError('The selected time slot is not available for this theater.', 400));
+  }
+
   // Prevent Double Booking
   const existingBooking = await Booking.findOne({
     theater: theaterId,
@@ -95,23 +102,31 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   const advanceAmount = 750;
   const balanceAmount = total > advanceAmount ? total - advanceAmount : 0;
 
-  const booking = await Booking.create({
-    user: req.user._id,
-    theater: theaterId,
-    city: theater.city._id,
-    date: bookingDate,
-    timeSlot,
-    eventType: eventTypeId,
-    cake: processedCake,
-    addOns: processedAddOns,
-    pricing: { theaterPrice, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
-    customerDetails: {
-      ...customerDetails,
-      members,
-      kids
-    },
-    status: 'pending',
-  });
+  let booking;
+  try {
+    booking = await Booking.create({
+      user: req.user._id,
+      theater: theaterId,
+      city: theater.city._id,
+      date: bookingDate,
+      timeSlot,
+      eventType: eventTypeId,
+      cake: processedCake,
+      addOns: processedAddOns,
+      pricing: { theaterPrice, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
+      customerDetails: {
+        ...customerDetails,
+        members,
+        kids
+      },
+      status: 'pending',
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return next(new AppError('Sorry, this slot is no longer available. Please select another time.', 400));
+    }
+    throw error;
+  }
 
   await booking.populate([
     { path: 'theater', select: 'name images address' },
