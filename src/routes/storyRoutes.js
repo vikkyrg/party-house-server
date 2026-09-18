@@ -13,11 +13,11 @@ const router = express.Router();
 router
   .route('/')
   .get(getStories)
-  .post(protect, authorize('admin'), upload.single('image'), addStory);
+  .post(protect, authorize('admin'), upload.any(), addStory);
 
 router
   .route('/:id')
-  .put(protect, authorize('admin'), upload.single('image'), updateStory)
+  .put(protect, authorize('admin'), upload.any(), updateStory)
   .delete(protect, authorize('admin'), deleteStory);
 
 module.exports = router;

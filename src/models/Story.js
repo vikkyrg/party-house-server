@@ -7,10 +7,19 @@ const StorySchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    content: {
+    shortDescription: {
       type: String,
-      required: true,
     },
+    content: {
+      type: String, // Kept optional for backward compatibility
+    },
+    sections: [
+      {
+        title: { type: String, required: true },
+        description: { type: String, required: true },
+        image: { type: String },
+      }
+    ],
     author: {
       type: String,
       default: 'Admin',

@@ -36,15 +36,34 @@ exports.getStories = catchAsync(async (req, res, next) => {
 // @route   POST /api/v1/stories
 // @access  Private/Admin
 exports.addStory = catchAsync(async (req, res, next) => {
-  if (!req.file && !req.body.image) {
-    return next(new AppError(`Please upload a file`, 400));
-  }
-
   const data = { ...req.body };
 
-  if (req.file) {
-    const base64Data = req.file.buffer.toString('base64');
-    data.image = `data:${req.file.mimetype};base64,${base64Data}`;
+  if (data.sections && typeof data.sections === 'string') {
+    try {
+      data.sections = JSON.parse(data.sections);
+    } catch (err) {
+      return next(new AppError('Invalid sections format', 400));
+    }
+  }
+
+  if (req.files && req.files.length > 0) {
+    req.files.forEach(file => {
+      const base64Data = file.buffer.toString('base64');
+      const imageString = `data:${file.mimetype};base64,${base64Data}`;
+      
+      if (file.fieldname === 'image') {
+        data.image = imageString;
+      } else if (file.fieldname.startsWith('section_image_')) {
+        const index = parseInt(file.fieldname.split('_')[2]);
+        if (data.sections && data.sections[index]) {
+          data.sections[index].image = imageString;
+        }
+      }
+    });
+  }
+
+  if (!data.image) {
+    return next(new AppError(`Please upload a cover image`, 400));
   }
 
   const story = await Story.create(data);
@@ -67,9 +86,28 @@ exports.updateStory = catchAsync(async (req, res, next) => {
 
   const data = { ...req.body };
 
-  if (req.file) {
-    const base64Data = req.file.buffer.toString('base64');
-    data.image = `data:${req.file.mimetype};base64,${base64Data}`;
+  if (data.sections && typeof data.sections === 'string') {
+    try {
+      data.sections = JSON.parse(data.sections);
+    } catch (err) {
+      return next(new AppError('Invalid sections format', 400));
+    }
+  }
+
+  if (req.files && req.files.length > 0) {
+    req.files.forEach(file => {
+      const base64Data = file.buffer.toString('base64');
+      const imageString = `data:${file.mimetype};base64,${base64Data}`;
+      
+      if (file.fieldname === 'image') {
+        data.image = imageString;
+      } else if (file.fieldname.startsWith('section_image_')) {
+        const index = parseInt(file.fieldname.split('_')[2]);
+        if (data.sections && data.sections[index]) {
+          data.sections[index].image = imageString;
+        }
+      }
+    });
   }
 
   story = await Story.findByIdAndUpdate(req.params.id, data, {
