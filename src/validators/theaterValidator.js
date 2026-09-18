@@ -7,8 +7,12 @@ exports.createTheaterSchema = Joi.object({
   location: Joi.string().hex().length(24).required(),
   address: Joi.string().max(500).required(),
   landmark: Joi.string().allow(''),
+  googleMapsLink: Joi.string().uri().allow(''),
   capacity: Joi.number().integer().min(5).max(50).required(),
   pricePerHour: Joi.number().min(0).required(),
+  additionalGuestPrice: Joi.number().min(0).default(0),
+  theatreVideoUrl: Joi.string().uri().allow(''),
+  branchVideoUrl: Joi.string().uri().allow(''),
   amenities: Joi.array().items(Joi.string()),
   eventTypes: Joi.array().items(Joi.string().hex().length(24)),
   slots: Joi.alternatives().try(

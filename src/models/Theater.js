@@ -25,6 +25,10 @@ const TheaterSchema = new mongoose.Schema(
       required: [true, 'Theater address is required'],
       maxlength: 500,
     },
+    googleMapsLink: {
+      type: String,
+      match: [/^https?:\/\/.+/, 'Please provide a valid URL for Google Maps'],
+    },
     landmark: String,
     capacity: {
       type: Number,
@@ -37,6 +41,11 @@ const TheaterSchema = new mongoose.Schema(
       required: [true, 'Price per hour is required'],
       min: [0, 'Price cannot be negative'],
     },
+    additionalGuestPrice: {
+      type: Number,
+      default: 0,
+      min: [0, 'Price cannot be negative'],
+    },
     images: [
       {
         url: { type: String, required: true },
@@ -44,6 +53,14 @@ const TheaterSchema = new mongoose.Schema(
         alt: String,
       },
     ],
+    theatreVideoUrl: {
+      type: String,
+      match: [/^https?:\/\/.+/, 'Please provide a valid video URL'],
+    },
+    branchVideoUrl: {
+      type: String,
+      match: [/^https?:\/\/.+/, 'Please provide a valid video URL'],
+    },
     amenities: [
       {
         type: String,

@@ -227,7 +227,19 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
 
   let allSlots = [];
   if (theater.slots && theater.slots.length > 0) {
-    allSlots = theater.slots.map(s => `${s.startTime} - ${s.endTime}`);
+    const parseTime = (timeStr) => {
+      if (!timeStr) return 0;
+      const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+      if (!match) return 0;
+      let [_, hours, minutes, modifier] = match;
+      hours = parseInt(hours, 10);
+      if (hours === 12) hours = 0;
+      if (modifier.toUpperCase() === 'PM') hours += 12;
+      return hours * 60 + parseInt(minutes, 10);
+    };
+
+    const sortedSlots = [...theater.slots].sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+    allSlots = sortedSlots.map(s => `${s.startTime} - ${s.endTime}`);
   }
 
   const booked = bookedSlots.map((b) => b.timeSlot);
