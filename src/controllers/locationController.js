@@ -2,7 +2,7 @@ const Location = require('../models/Location');
 const Theater = require('../models/Theater');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
-const { uploadToCloudinary, deleteFromCloudinary } = require('../services/fileService');
+const { uploadToRawData, deleteFromCloudinary } = require('../services/fileService');
 const { createAuditLog } = require('../services/auditService');
 
 exports.getLocations = catchAsync(async (req, res) => {
@@ -23,7 +23,7 @@ exports.createLocation = catchAsync(async (req, res) => {
   const locationData = { ...req.body };
 
   if (req.file) {
-    const uploaded = await uploadToCloudinary(req.file, 'locations');
+    const uploaded = await uploadToRawData(req.file);
     locationData.image = { url: uploaded.url, publicId: uploaded.publicId };
   }
 
@@ -49,7 +49,7 @@ exports.updateLocation = catchAsync(async (req, res, next) => {
 
   if (req.file) {
     if (existing.image?.publicId) await deleteFromCloudinary(existing.image.publicId);
-    const uploaded = await uploadToCloudinary(req.file, 'locations');
+    const uploaded = await uploadToRawData(req.file);
     req.body.image = { url: uploaded.url, publicId: uploaded.publicId };
   }
 

@@ -15,5 +15,8 @@ router.use(protect, restrictTo('admin', 'super-admin'));
 router.post('/theater/:theaterId', uploadMultiple('images', 10), validateRequest(createRoomSchema), roomController.createRoom);
 router.put('/:id', uploadMultiple('images', 10), validateRequest(updateRoomSchema), roomController.updateRoom);
 router.delete('/:id', roomController.deleteRoom);
+router.post('/:id/slots', roomController.createSlot);
+router.put('/:id/slots/:slotId', roomController.updateSlot);
+router.delete('/:id/slots/:slotId', roomController.deleteSlot);
 
 module.exports = router;

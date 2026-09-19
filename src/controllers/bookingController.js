@@ -29,12 +29,16 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   // Validate Capacity
   const members = parseInt(customerDetails.members || 1, 10);
   const kids = parseInt(customerDetails.kids || 0, 10);
-  if (members + kids > room.capacity) {
-    return next(new AppError(`Guest count (${members + kids}) exceeds room capacity of ${room.capacity}.`, 400));
-  }
+  const extraGuestCount = Math.max(0, members - room.capacity);
+  const extraGuestTotal = extraGuestCount * (room.extraGuestPrice || 0);
 
   const bookingDate = new Date(date);
   bookingDate.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (Number.isNaN(bookingDate.getTime()) || bookingDate < today) {
+    return next(new AppError('Booking date must be today or a future date.', 400));
+  }
 
   const configuredSlots = (room.slots || []).filter((slot) => slot.isActive !== false).map(
     (slot) => `${slot.startTime} - ${slot.endTime}`
@@ -99,7 +103,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     }
   }
 
-  const subtotal = theaterPrice + cakePrice + addOnsTotal;
+  const subtotal = theaterPrice + extraGuestTotal + cakePrice + addOnsTotal;
   const tax = 0; // Using zero tax as per requirement summary
   let discount = 0;
   if (discountCode) discount = subtotal * 0.1;
@@ -120,7 +124,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       eventType: eventTypeId,
       cake: processedCake,
       addOns: processedAddOns,
-      pricing: { theaterPrice, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
+      pricing: { theaterPrice, roomBasePrice: theaterPrice, extraGuestPrice: room.extraGuestPrice || 0, extraGuestCount, extraGuestTotal, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
       customerDetails: {
         ...customerDetails,
         members,

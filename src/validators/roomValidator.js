@@ -12,6 +12,7 @@ const schema = Joi.object({
   description: Joi.string().max(1000).allow(''),
   capacity: Joi.number().integer().min(1).max(100).required(),
   basePrice: Joi.number().min(0).required(),
+  extraGuestPrice: Joi.number().min(0).default(0),
   googleMapLink: Joi.string().uri().allow(''),
   features: Joi.alternatives().try(Joi.string(), Joi.array().items(Joi.string())),
   amenities: Joi.alternatives().try(Joi.string(), Joi.array().items(Joi.string())),

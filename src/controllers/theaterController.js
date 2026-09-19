@@ -3,7 +3,7 @@ const Review = require('../models/Review');
 const Booking = require('../models/Booking');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
-const { uploadToCloudinary, deleteFromCloudinary } = require('../services/fileService');
+const { uploadToRawData, deleteFromCloudinary } = require('../services/fileService');
 const { createAuditLog } = require('../services/auditService');
 
 exports.getTheaters = catchAsync(async (req, res) => {
@@ -119,7 +119,7 @@ exports.createTheater = catchAsync(async (req, res) => {
   if (req.files?.length) {
     theaterData.images = [];
     for (const file of req.files) {
-      const uploaded = await uploadToCloudinary(file, 'theaters');
+      const uploaded = await uploadToRawData(file);
       theaterData.images.push({ url: uploaded.url, publicId: uploaded.publicId });
     }
   }
@@ -157,7 +157,7 @@ exports.updateTheater = catchAsync(async (req, res, next) => {
 
   if (req.files?.length) {
     for (const file of req.files) {
-      const uploaded = await uploadToCloudinary(file, 'theaters');
+      const uploaded = await uploadToRawData(file);
       theater.images.push({ url: uploaded.url, publicId: uploaded.publicId });
     }
   }

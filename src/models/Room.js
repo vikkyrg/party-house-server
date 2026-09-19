@@ -32,6 +32,7 @@ const RoomSchema = new mongoose.Schema(
     description: { type: String, default: '', maxlength: 1000 },
     capacity: { type: Number, required: true, min: 1, max: 100 },
     basePrice: { type: Number, required: true, min: 0 },
+    extraGuestPrice: { type: Number, default: 0, min: 0 },
     image: imageSchema,
     galleryImages: [imageSchema],
     features: [{ type: String, trim: true }],
@@ -42,8 +43,12 @@ const RoomSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
     sortOrder: { type: Number, default: 0 },
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
+
+RoomSchema.virtual('theaterId').get(function () {
+  return this.theater;
+});
 
 RoomSchema.index({ theater: 1, name: 1 }, { unique: true });
 RoomSchema.index({ theater: 1, isActive: 1, sortOrder: 1 });

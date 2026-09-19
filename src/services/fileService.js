@@ -46,7 +46,7 @@ const uploadToCloudinary = async (file, folder = 'cs-cinemas') => {
 };
 
 const deleteFromCloudinary = async (publicId) => {
-  if (!publicId || publicId.startsWith('mock_')) return;
+  if (!publicId || publicId.startsWith('mock_') || publicId.startsWith('raw_')) return;
   
   try {
     await File.findByIdAndDelete(publicId);
@@ -55,4 +55,13 @@ const deleteFromCloudinary = async (publicId) => {
   }
 };
 
-module.exports = { uploadToCloudinary, deleteFromCloudinary };
+const uploadToRawData = async (file) => {
+  if (!file?.buffer) throw new AppError('File buffer or image data is missing', 400);
+  const contentType = file.mimetype || 'image/png';
+  return {
+    url: `data:${contentType};base64,${file.buffer.toString('base64')}`,
+    publicId: `raw_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  };
+};
+
+module.exports = { uploadToCloudinary, uploadToRawData, deleteFromCloudinary };
