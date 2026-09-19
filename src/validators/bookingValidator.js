@@ -2,6 +2,7 @@ const Joi = require('joi');
 
 exports.createBookingSchema = Joi.object({
   theaterId: Joi.string().hex().length(24).required(),
+  roomId: Joi.string().hex().length(24).required(),
   date: Joi.date().iso().required(),
   timeSlot: Joi.string().required(),
   eventTypeId: Joi.string().hex().length(24).required(),
@@ -34,6 +35,7 @@ exports.cancelBookingSchema = Joi.object({
 });
 
 exports.checkAvailabilitySchema = Joi.object({
-  theaterId: Joi.string().hex().length(24).required(),
+  theaterId: Joi.string().hex().length(24),
+  roomId: Joi.string().hex().length(24),
   date: Joi.date().iso().required(),
-});
+}).or('theaterId', 'roomId');

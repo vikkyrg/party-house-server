@@ -13,10 +13,14 @@ const BookingSchema = new mongoose.Schema(
       ref: 'Theater',
       required: [true, 'Booking must belong to a theater'],
     },
+    room: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Room',
+    },
     city: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'City',
-      required: [true, 'Booking must belong to a city'],
+      required: false,
     },
     date: { type: Date, required: [true, 'Booking date is required'] },
     timeSlot: { type: String, required: [true, 'Time slot is required'] },
@@ -101,10 +105,11 @@ const BookingSchema = new mongoose.Schema(
 
 BookingSchema.index({ theater: 1, date: 1 });
 BookingSchema.index(
-  { theater: 1, date: 1, timeSlot: 1 },
+  { room: 1, date: 1, timeSlot: 1 },
   {
     unique: true,
     partialFilterExpression: {
+      room: { $exists: true },
       status: { $in: ['pending', 'confirmed', 'in-progress', 'completed'] },
     },
   }

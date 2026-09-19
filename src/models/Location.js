@@ -6,7 +6,7 @@ const LocationSchema = new mongoose.Schema(
     city: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'City',
-      required: [true, 'Location must belong to a city'],
+      required: false,
     },
     name: {
       type: String,
@@ -15,6 +15,16 @@ const LocationSchema = new mongoose.Schema(
     },
     slug: { type: String, lowercase: true },
     pincode: String,
+    displayName: String,
+    address: String,
+    area: String,
+    cityName: String,
+    stateName: String,
+    countryName: { type: String, default: 'India' },
+    googleMapLink: String,
+    latitude: Number,
+    longitude: Number,
+    description: String,
     image: {
       url: String,
       publicId: String,

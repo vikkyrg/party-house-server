@@ -7,7 +7,6 @@ const { createAuditLog } = require('../services/auditService');
 
 exports.getLocations = catchAsync(async (req, res) => {
   const filter = {};
-  if (req.query.city) filter.city = req.query.city;
   if (!req.query.includeInactive) filter.isActive = true;
 
   const locations = await Location.find(filter).populate('city', 'name code').sort('name');

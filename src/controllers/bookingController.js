@@ -3,6 +3,7 @@ const Booking = require('../models/Booking');
 const invoiceService = require('../services/invoiceService');
 const logger = require('../utils/logger');
 const Theater = require('../models/Theater');
+const Room = require('../models/Room');
 const Cake = require('../models/Cake');
 const AddOn = require('../models/AddOn');
 const User = require('../models/User');
@@ -14,7 +15,7 @@ const appConfig = require('../config/app');
 const { GST_RATE } = require('../utils/constants');
 
 exports.createBooking = catchAsync(async (req, res, next) => {
-  const { theaterId, date, timeSlot, eventTypeId, addOns, customerDetails, discountCode } =
+  const { theaterId, roomId, date, timeSlot, eventTypeId, addOns, customerDetails, discountCode } =
     req.body;
 
   const theater = await Theater.findById(theaterId).populate('city');
@@ -22,17 +23,20 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     return next(new AppError('Theater not found or inactive', 404));
   }
 
+  const room = await Room.findOne({ _id: roomId, theater: theaterId });
+  if (!room || !room.isActive) return next(new AppError('Room not found or inactive', 404));
+
   // Validate Capacity
   const members = parseInt(customerDetails.members || 1, 10);
   const kids = parseInt(customerDetails.kids || 0, 10);
-  if (members + kids > theater.capacity) {
-    return next(new AppError(`Guest count (${members + kids}) exceeds theater capacity of ${theater.capacity}.`, 400));
+  if (members + kids > room.capacity) {
+    return next(new AppError(`Guest count (${members + kids}) exceeds room capacity of ${room.capacity}.`, 400));
   }
 
   const bookingDate = new Date(date);
   bookingDate.setHours(0, 0, 0, 0);
 
-  const configuredSlots = (theater.slots || []).map(
+  const configuredSlots = (room.slots || []).filter((slot) => slot.isActive !== false).map(
     (slot) => `${slot.startTime} - ${slot.endTime}`
   );
   if (!configuredSlots.includes(timeSlot)) {
@@ -50,7 +54,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
 
   // Prevent Double Booking
   const existingBooking = await Booking.findOne({
-    theater: theaterId,
+    room: roomId,
     date: bookingDate,
     timeSlot,
     status: { $nin: ['cancelled', 'no-show', 'failed'] },
@@ -60,7 +64,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     return next(new AppError('Sorry, this slot is no longer available. Please select another time.', 400));
   }
 
-  const theaterPrice = theater.pricePerHour;
+  const theaterPrice = room.basePrice;
   let addOnsTotal = 0;
   let cakePrice = 0;
   let processedCake = undefined;
@@ -109,7 +113,8 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     booking = await Booking.create({
       user: req.user._id,
       theater: theaterId,
-      city: theater.city._id,
+      room: roomId,
+      city: theater.city?._id,
       date: bookingDate,
       timeSlot,
       eventType: eventTypeId,
@@ -243,23 +248,25 @@ exports.cancelBooking = catchAsync(async (req, res, next) => {
 });
 
 exports.checkAvailability = catchAsync(async (req, res, next) => {
-  const { theaterId, date } = req.query;
+  const { theaterId, roomId, date } = req.query;
   const bookingDate = new Date(date);
   bookingDate.setHours(0, 0, 0, 0);
 
-  const theater = await Theater.findById(theaterId);
+  const room = roomId ? await Room.findById(roomId) : null;
+  const theater = roomId ? await Theater.findById(room?.theater) : await Theater.findById(theaterId);
   if (!theater) {
     return next(new AppError('Theater not found', 404));
   }
 
   const bookedSlots = await Booking.find({
-    theater: theaterId,
+    ...(roomId ? { room: roomId } : { theater: theaterId }),
     date: bookingDate,
     status: { $nin: ['cancelled', 'no-show', 'failed'] },
   }).select('timeSlot');
 
   let allSlots = [];
-  if (theater.slots && theater.slots.length > 0) {
+  const configuredSlots = roomId ? room?.slots : theater.slots;
+  if (configuredSlots && configuredSlots.length > 0) {
     const parseTime = (timeStr) => {
       if (!timeStr) return 0;
       const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -271,7 +278,7 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
       return hours * 60 + parseInt(minutes, 10);
     };
 
-    const sortedSlots = [...theater.slots].sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+    const sortedSlots = [...configuredSlots].filter((slot) => slot.isActive !== false).sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
     allSlots = sortedSlots.map(s => `${s.startTime} - ${s.endTime}`);
   }
 
