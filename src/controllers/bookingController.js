@@ -46,6 +46,9 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   if (!configuredSlots.includes(timeSlot)) {
     return next(new AppError('The selected time slot is not available for this theater.', 400));
   }
+  if (timeSlotId && !room.slots.id(timeSlotId)) {
+    return next(new AppError('The selected time slot is not available for this room.', 400));
+  }
 
   let selectedCake = null;
   if (req.body.cake) {
@@ -60,15 +63,12 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   const existingBooking = await Booking.findOne({
     room: roomId,
     date: normalizedBookingDate,
-    bookingDate: normalizedBookingDate,
     timeSlot,
-    timeSlotId: timeSlotId || undefined,
-    location: locationId || theater.location,
     status: { $nin: ['cancelled', 'no-show', 'failed'] },
   });
 
   if (existingBooking) {
-    return next(new AppError('Sorry, this slot is no longer available. Please select another time.', 400));
+    return next(new AppError('Sorry, this time slot was just booked. Please choose another time slot.', 400));
   }
 
   const theaterPrice = room.price;
@@ -124,6 +124,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       city: theater.city?._id,
       date: normalizedBookingDate,
       timeSlot,
+      timeSlotId: timeSlotId || undefined,
       eventType: eventTypeId,
       cake: processedCake,
       addOns: processedAddOns,
@@ -137,7 +138,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     });
   } catch (error) {
     if (error?.code === 11000) {
-      return next(new AppError('Sorry, this slot is no longer available. Please select another time.', 400));
+      return next(new AppError('Sorry, this time slot was just booked. Please choose another time slot.', 400));
     }
     throw error;
   }

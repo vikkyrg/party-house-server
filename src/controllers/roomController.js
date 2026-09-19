@@ -67,7 +67,8 @@ exports.getAvailability = catchAsync(async (req, res, next) => {
   const bookedSlots = new Set(booked.map((booking) => booking.timeSlot));
   const slots = (room.slots || []).filter((slot) => slot.isActive !== false).map((slot) => {
     const time = `${slot.startTime} - ${slot.endTime}`;
-    return { id: slot._id, time, startTime: slot.startTime, endTime: slot.endTime, available: !bookedSlots.has(time) };
+    const available = !bookedSlots.has(time);
+    return { id: slot._id, time, startTime: slot.startTime, endTime: slot.endTime, available, status: available ? 'available' : 'booked' };
   });
   res.json({ success: true, data: { room: room.name, roomId: room._id, date, slots, availableSlots: slots.filter((slot) => slot.available), bookedSlots: slots.filter((slot) => !slot.available) } });
 });
