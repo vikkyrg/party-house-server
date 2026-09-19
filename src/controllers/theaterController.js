@@ -1,6 +1,7 @@
 const Theater = require('../models/Theater');
 const Review = require('../models/Review');
 const Booking = require('../models/Booking');
+require('../models/Room');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const { uploadToRawData, deleteFromCloudinary } = require('../services/fileService');
@@ -9,7 +10,6 @@ const { createAuditLog } = require('../services/auditService');
 exports.getTheaters = catchAsync(async (req, res) => {
   const filter = {};
   if (!req.query.includeInactive) filter.isActive = true;
-  if (req.query.city) filter.city = req.query.city;
   if (req.query.location) filter.location = req.query.location;
   if (req.query.search) {
     filter.$or = [
@@ -25,8 +25,8 @@ exports.getTheaters = catchAsync(async (req, res) => {
 
   const [theaters, total] = await Promise.all([
     Theater.find(filter)
-      .populate('city', 'name code')
       .populate('location', 'name')
+      .populate('rooms', '_id isActive')
       .populate('eventTypes', 'name')
       .sort(sort)
       .skip(skip)
@@ -44,8 +44,8 @@ exports.getTheaters = catchAsync(async (req, res) => {
 
 exports.getTheater = catchAsync(async (req, res, next) => {
   const theater = await Theater.findById(req.params.id)
-    .populate('city', 'name code')
     .populate('location', 'name pincode')
+    .populate('rooms', '_id name capacity basePrice additionalGuestPrice isActive')
     .populate('eventTypes', 'name description basePrice');
 
   if (!theater) return next(new AppError('Theater not found', 404));
@@ -107,6 +107,7 @@ exports.getTheaterReviews = catchAsync(async (req, res, next) => {
 
 exports.createTheater = catchAsync(async (req, res) => {
   const theaterData = { ...req.body };
+  ['city', 'capacity', 'pricePerHour', 'additionalGuestPrice', 'theatreVideoUrl', 'branchVideoUrl', 'slots', 'eventTypes'].forEach((field) => delete theaterData[field]);
 
   if (typeof theaterData.slots === 'string') {
     try {
@@ -143,6 +144,7 @@ exports.updateTheater = catchAsync(async (req, res, next) => {
   if (!theater) return next(new AppError('Theater not found', 404));
 
   const before = theater.toObject();
+  ['city', 'capacity', 'pricePerHour', 'additionalGuestPrice', 'theatreVideoUrl', 'branchVideoUrl', 'slots', 'eventTypes'].forEach((field) => delete req.body[field]);
   
   if (typeof req.body.slots === 'string') {
     try {

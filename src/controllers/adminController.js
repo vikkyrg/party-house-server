@@ -1,6 +1,7 @@
 const Booking = require('../models/Booking');
 const User = require('../models/User');
 const Theater = require('../models/Theater');
+require('../models/Room');
 const City = require('../models/City');
 const Location = require('../models/Location');
 const EventType = require('../models/EventType');
@@ -607,11 +608,10 @@ exports.getAdminLocations = catchAsync(async (req, res) => {
 });
 
 exports.getAdminTheaters = catchAsync(async (req, res) => {
-  const { city, location, search, page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } =
+  const { location, search, page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } =
     req.query;
   const safeLimit = Math.min(parseInt(limit, 10) || 20, 100);
   const query = {};
-  if (city) query.city = city;
   if (location) query.location = location;
   if (search) {
     query.$or = [
@@ -621,8 +621,8 @@ exports.getAdminTheaters = catchAsync(async (req, res) => {
   }
 
   const theaters = await Theater.find(query)
-    .populate('city', 'name code')
     .populate('location', 'name')
+    .populate('rooms', '_id isActive')
     .populate('eventTypes', 'name')
     .sort({ [sortBy]: order === 'asc' ? 1 : -1 })
     .limit(safeLimit)

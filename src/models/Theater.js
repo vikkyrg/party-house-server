@@ -91,8 +91,14 @@ const TheaterSchema = new mongoose.Schema(
     metaTitle: String,
     metaDescription: String,
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
+
+TheaterSchema.virtual('rooms', {
+  ref: 'Room',
+  localField: '_id',
+  foreignField: 'theater',
+});
 
 TheaterSchema.index({ city: 1, location: 1 });
 TheaterSchema.index({ isActive: 1, isFeatured: 1 });
