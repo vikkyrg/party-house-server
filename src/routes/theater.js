@@ -12,7 +12,6 @@ const router = express.Router();
 router.get('/', theaterController.getTheaters);
 router.get('/:theaterId/rooms', roomController.getRooms);
 router.get('/:id', theaterController.getTheater);
-router.get('/:id/availability', theaterController.getTheaterAvailability);
 router.get('/:id/reviews', theaterController.getTheaterReviews);
 
 router.use(protect, restrictTo('admin', 'super-admin'));

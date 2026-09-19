@@ -22,7 +22,7 @@ const TheaterSchema = new mongoose.Schema(
     },
     address: {
       type: String,
-      required: [true, 'Theater address is required'],
+      required: false,
       maxlength: 500,
     },
     googleMapsLink: {
@@ -32,13 +32,13 @@ const TheaterSchema = new mongoose.Schema(
     landmark: String,
     capacity: {
       type: Number,
-      required: [true, 'Theater capacity is required'],
+      required: false,
       min: [5, 'Minimum capacity is 5'],
       max: [50, 'Maximum capacity is 50'],
     },
     pricePerHour: {
       type: Number,
-      required: [true, 'Price per hour is required'],
+      required: false,
       min: [0, 'Price cannot be negative'],
     },
     additionalGuestPrice: {

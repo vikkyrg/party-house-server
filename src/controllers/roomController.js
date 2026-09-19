@@ -11,6 +11,14 @@ const parseJsonField = (value, fallback = []) => {
   try { return JSON.parse(value); } catch { return fallback; }
 };
 
+const normalizeRoomData = (data) => {
+  if (data.extraGuestPrice !== undefined && data.additionalGuestPrice === undefined) {
+    data.additionalGuestPrice = data.extraGuestPrice;
+  }
+  delete data.extraGuestPrice;
+  return data;
+};
+
 const applyUploadedImages = async (req, roomData, existingRoom = null) => {
   if (!req.files?.length) return;
   const uploaded = [];
@@ -64,7 +72,7 @@ exports.getAvailability = catchAsync(async (req, res, next) => {
 exports.createRoom = catchAsync(async (req, res, next) => {
   const theater = await Theater.findById(req.params.theaterId);
   if (!theater) return next(new AppError('Theater not found', 404));
-  const roomData = { ...req.body, theater: theater._id };
+  const roomData = normalizeRoomData({ ...req.body, theater: theater._id });
   roomData.features = parseJsonField(roomData.features);
   roomData.amenities = parseJsonField(roomData.amenities);
   roomData.slots = parseJsonField(roomData.slots);
@@ -76,7 +84,7 @@ exports.createRoom = catchAsync(async (req, res, next) => {
 exports.updateRoom = catchAsync(async (req, res, next) => {
   const room = await Room.findById(req.params.id);
   if (!room) return next(new AppError('Room not found', 404));
-  const roomData = { ...req.body };
+  const roomData = normalizeRoomData({ ...req.body });
   ['features', 'amenities', 'slots'].forEach((field) => { roomData[field] = parseJsonField(roomData[field], room[field]); });
   await applyUploadedImages(req, roomData, room);
   Object.assign(room, roomData);

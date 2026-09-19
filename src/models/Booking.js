@@ -13,6 +13,10 @@ const BookingSchema = new mongoose.Schema(
       ref: 'Theater',
       required: [true, 'Booking must belong to a theater'],
     },
+    location: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Location',
+    },
     room: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Room',
@@ -23,7 +27,9 @@ const BookingSchema = new mongoose.Schema(
       required: false,
     },
     date: { type: Date, required: [true, 'Booking date is required'] },
+    bookingDate: { type: Date },
     timeSlot: { type: String, required: [true, 'Time slot is required'] },
+    timeSlotId: { type: mongoose.Schema.Types.ObjectId },
     eventType: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'EventType',

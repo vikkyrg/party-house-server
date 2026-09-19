@@ -32,7 +32,7 @@ const RoomSchema = new mongoose.Schema(
     description: { type: String, default: '', maxlength: 1000 },
     capacity: { type: Number, required: true, min: 1, max: 100 },
     basePrice: { type: Number, required: true, min: 0 },
-    extraGuestPrice: { type: Number, default: 0, min: 0 },
+    additionalGuestPrice: { type: Number, default: 0, min: 0 },
     image: imageSchema,
     galleryImages: [imageSchema],
     features: [{ type: String, trim: true }],
@@ -48,6 +48,10 @@ const RoomSchema = new mongoose.Schema(
 
 RoomSchema.virtual('theaterId').get(function () {
   return this.theater;
+});
+
+RoomSchema.virtual('extraGuestPrice').get(function () {
+  return this.additionalGuestPrice;
 });
 
 RoomSchema.index({ theater: 1, name: 1 }, { unique: true });

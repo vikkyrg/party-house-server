@@ -15,7 +15,7 @@ const appConfig = require('../config/app');
 const { GST_RATE } = require('../utils/constants');
 
 exports.createBooking = catchAsync(async (req, res, next) => {
-  const { theaterId, roomId, date, timeSlot, eventTypeId, addOns, customerDetails, discountCode } =
+  const { theaterId, roomId, locationId, date, bookingDate, timeSlot, timeSlotId, eventTypeId, addOns, customerDetails, discountCode } =
     req.body;
 
   const theater = await Theater.findById(theaterId).populate('city');
@@ -30,13 +30,13 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   const members = parseInt(customerDetails.members || 1, 10);
   const kids = parseInt(customerDetails.kids || 0, 10);
   const extraGuestCount = Math.max(0, members - room.capacity);
-  const extraGuestTotal = extraGuestCount * (room.extraGuestPrice || 0);
+  const extraGuestTotal = extraGuestCount * (room.additionalGuestPrice || 0);
 
-  const bookingDate = new Date(date);
-  bookingDate.setHours(0, 0, 0, 0);
+  const normalizedBookingDate = new Date(bookingDate || date);
+  normalizedBookingDate.setHours(0, 0, 0, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  if (Number.isNaN(bookingDate.getTime()) || bookingDate < today) {
+  if (Number.isNaN(normalizedBookingDate.getTime()) || normalizedBookingDate < today) {
     return next(new AppError('Booking date must be today or a future date.', 400));
   }
 
@@ -59,8 +59,11 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   // Prevent Double Booking
   const existingBooking = await Booking.findOne({
     room: roomId,
-    date: bookingDate,
+    date: normalizedBookingDate,
+    bookingDate: normalizedBookingDate,
     timeSlot,
+    timeSlotId: timeSlotId || undefined,
+    location: locationId || theater.location,
     status: { $nin: ['cancelled', 'no-show', 'failed'] },
   });
 
@@ -119,12 +122,12 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       theater: theaterId,
       room: roomId,
       city: theater.city?._id,
-      date: bookingDate,
+      date: normalizedBookingDate,
       timeSlot,
       eventType: eventTypeId,
       cake: processedCake,
       addOns: processedAddOns,
-      pricing: { theaterPrice, roomBasePrice: theaterPrice, extraGuestPrice: room.extraGuestPrice || 0, extraGuestCount, extraGuestTotal, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
+      pricing: { theaterPrice, roomBasePrice: theaterPrice, extraGuestPrice: room.additionalGuestPrice || 0, extraGuestCount, extraGuestTotal, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
       customerDetails: {
         ...customerDetails,
         members,
@@ -252,24 +255,22 @@ exports.cancelBooking = catchAsync(async (req, res, next) => {
 });
 
 exports.checkAvailability = catchAsync(async (req, res, next) => {
-  const { theaterId, roomId, date } = req.query;
+  const { roomId, date } = req.query;
   const bookingDate = new Date(date);
   bookingDate.setHours(0, 0, 0, 0);
 
-  const room = roomId ? await Room.findById(roomId) : null;
-  const theater = roomId ? await Theater.findById(room?.theater) : await Theater.findById(theaterId);
-  if (!theater) {
-    return next(new AppError('Theater not found', 404));
-  }
+  const room = await Room.findById(roomId);
+  const theater = room ? await Theater.findById(room.theater) : null;
+  if (!room || !room.isActive || !theater || !theater.isActive) return next(new AppError('Room not found or inactive', 404));
 
   const bookedSlots = await Booking.find({
-    ...(roomId ? { room: roomId } : { theater: theaterId }),
+    room: roomId,
     date: bookingDate,
     status: { $nin: ['cancelled', 'no-show', 'failed'] },
   }).select('timeSlot');
 
   let allSlots = [];
-  const configuredSlots = roomId ? room?.slots : theater.slots;
+  const configuredSlots = room.slots;
   if (configuredSlots && configuredSlots.length > 0) {
     const parseTime = (timeStr) => {
       if (!timeStr) return 0;
