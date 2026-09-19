@@ -60,9 +60,9 @@ const BookingSchema = new mongoose.Schema(
     pricing: {
       theaterPrice: { type: Number, required: true },
       roomBasePrice: { type: Number, default: 0 },
-      extraGuestPrice: { type: Number, default: 0 },
-      extraGuestCount: { type: Number, default: 0 },
-      extraGuestTotal: { type: Number, default: 0 },
+      extraGuestPrice: Number,
+      extraGuestCount: Number,
+      extraGuestTotal: Number,
       addOnsTotal: { type: Number, default: 0 },
       cakePrice: { type: Number, default: 0 },
       subtotal: { type: Number, required: true },

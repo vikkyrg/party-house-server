@@ -26,11 +26,11 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   const room = await Room.findOne({ _id: roomId, theater: theaterId });
   if (!room || !room.isActive) return next(new AppError('Room not found or inactive', 404));
 
-  // Validate Capacity
   const members = parseInt(customerDetails.members || 1, 10);
   const kids = parseInt(customerDetails.kids || 0, 10);
-  const extraGuestCount = Math.max(0, members - room.capacity);
-  const extraGuestTotal = extraGuestCount * (room.additionalGuestPrice || 0);
+  if (members > room.maximumMembers) {
+    return next(new AppError(`Maximum ${room.maximumMembers} members allowed for this room.`, 400));
+  }
 
   const normalizedBookingDate = new Date(bookingDate || date);
   normalizedBookingDate.setHours(0, 0, 0, 0);
@@ -71,7 +71,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     return next(new AppError('Sorry, this slot is no longer available. Please select another time.', 400));
   }
 
-  const theaterPrice = room.basePrice;
+  const theaterPrice = room.price;
   let addOnsTotal = 0;
   let cakePrice = 0;
   let processedCake = undefined;
@@ -106,7 +106,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     }
   }
 
-  const subtotal = theaterPrice + extraGuestTotal + cakePrice + addOnsTotal;
+  const subtotal = theaterPrice + cakePrice + addOnsTotal;
   const tax = 0; // Using zero tax as per requirement summary
   let discount = 0;
   if (discountCode) discount = subtotal * 0.1;
@@ -127,7 +127,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       eventType: eventTypeId,
       cake: processedCake,
       addOns: processedAddOns,
-      pricing: { theaterPrice, roomBasePrice: theaterPrice, extraGuestPrice: room.additionalGuestPrice || 0, extraGuestCount, extraGuestTotal, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
+      pricing: { theaterPrice, roomBasePrice: theaterPrice, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
       customerDetails: {
         ...customerDetails,
         members,

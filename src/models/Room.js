@@ -30,9 +30,9 @@ const RoomSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true, maxlength: 100 },
     slug: { type: String, lowercase: true },
     description: { type: String, default: '', maxlength: 1000 },
-    capacity: { type: Number, required: true, min: 1, max: 100 },
-    basePrice: { type: Number, required: true, min: 0 },
-    additionalGuestPrice: { type: Number, default: 0, min: 0 },
+    couple: { type: Number, required: true, min: 1, max: 100, default: 2 },
+    maximumMembers: { type: Number, required: true, min: 1, max: 100 },
+    price: { type: Number, required: true, min: 0 },
     image: imageSchema,
     galleryImages: [imageSchema],
     features: [{ type: String, trim: true }],
@@ -50,8 +50,11 @@ RoomSchema.virtual('theaterId').get(function () {
   return this.theater;
 });
 
-RoomSchema.virtual('extraGuestPrice').get(function () {
-  return this.additionalGuestPrice;
+// Populate the new fields from legacy documents without rewriting old records.
+RoomSchema.pre('init', function (data) {
+  if (data.maximumMembers === undefined && data.capacity !== undefined) data.maximumMembers = data.capacity;
+  if (data.couple === undefined) data.couple = 2;
+  if (data.price === undefined && data.basePrice !== undefined) data.price = data.basePrice;
 });
 
 RoomSchema.index({ theater: 1, name: 1 }, { unique: true });

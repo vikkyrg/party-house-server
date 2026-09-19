@@ -12,11 +12,14 @@ const parseJsonField = (value, fallback = []) => {
 };
 
 const normalizeRoomData = (data) => {
-  if (data.extraGuestPrice !== undefined && data.additionalGuestPrice === undefined) {
-    data.additionalGuestPrice = data.extraGuestPrice;
-  }
-  delete data.extraGuestPrice;
-  return data;
+  const normalized = { ...data };
+  if (normalized.maximumMembers === undefined && normalized.capacity !== undefined) normalized.maximumMembers = normalized.capacity;
+  if (normalized.price === undefined && normalized.basePrice !== undefined) normalized.price = normalized.basePrice;
+  delete normalized.capacity;
+  delete normalized.basePrice;
+  delete normalized.additionalGuestPrice;
+  delete normalized.extraGuestPrice;
+  return normalized;
 };
 
 const applyUploadedImages = async (req, roomData, existingRoom = null) => {
@@ -86,6 +89,9 @@ exports.updateRoom = catchAsync(async (req, res, next) => {
   if (!room) return next(new AppError('Room not found', 404));
   const roomData = normalizeRoomData({ ...req.body });
   ['features', 'amenities', 'slots'].forEach((field) => { roomData[field] = parseJsonField(roomData[field], room[field]); });
+  const couple = Number(roomData.couple ?? room.couple);
+  const maximumMembers = Number(roomData.maximumMembers ?? room.maximumMembers);
+  if (maximumMembers < couple) return next(new AppError('Maximum Members must be greater than or equal to Couple.', 400));
   await applyUploadedImages(req, roomData, room);
   Object.assign(room, roomData);
   await room.save();

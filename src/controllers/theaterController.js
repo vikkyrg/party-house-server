@@ -45,7 +45,7 @@ exports.getTheaters = catchAsync(async (req, res) => {
 exports.getTheater = catchAsync(async (req, res, next) => {
   const theater = await Theater.findById(req.params.id)
     .populate('location', 'name pincode')
-    .populate('rooms', '_id name capacity basePrice additionalGuestPrice isActive')
+    .populate('rooms', '_id name couple maximumMembers price description image slots isActive')
     .populate('eventTypes', 'name description basePrice');
 
   if (!theater) return next(new AppError('Theater not found', 404));
