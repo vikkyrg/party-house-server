@@ -9,6 +9,12 @@ const TheaterSchema = new mongoose.Schema(
       trim: true,
       maxlength: 100,
     },
+    description: {
+      type: String,
+      default: '',
+      maxlength: 1000,
+      trim: true,
+    },
     slug: { type: String, lowercase: true, unique: true },
     city: {
       type: mongoose.Schema.Types.ObjectId,
