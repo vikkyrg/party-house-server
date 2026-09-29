@@ -15,6 +15,10 @@ const normalizeRoomData = (data) => {
   const normalized = { ...data };
   if (normalized.maximumMembers === undefined && normalized.capacity !== undefined) normalized.maximumMembers = normalized.capacity;
   if (normalized.price === undefined && normalized.basePrice !== undefined) normalized.price = normalized.basePrice;
+  // Handle optional couple: empty string means "not provided"
+  if (normalized.couple === '' || normalized.couple === null || normalized.couple === 'null') {
+    delete normalized.couple;
+  }
   delete normalized.capacity;
   delete normalized.basePrice;
   delete normalized.additionalGuestPrice;
@@ -46,6 +50,13 @@ exports.getRooms = catchAsync(async (req, res, next) => {
   res.json({ success: true, count: rooms.length, data: rooms });
 });
 
+exports.getAllRooms = catchAsync(async (req, res, next) => {
+  const filter = {};
+  if (!req.query.includeInactive) filter.isActive = true;
+  const rooms = await Room.find(filter).populate('theater', 'name').sort({ sortOrder: 1, name: 1 });
+  res.json({ success: true, count: rooms.length, data: rooms });
+});
+
 exports.getRoom = catchAsync(async (req, res, next) => {
   const room = await Room.findById(req.params.id).populate({
     path: 'theater',
@@ -74,8 +85,15 @@ exports.getAvailability = catchAsync(async (req, res, next) => {
 });
 
 exports.createRoom = catchAsync(async (req, res, next) => {
-  const theater = await Theater.findById(req.params.theaterId);
+  let theaterId = req.params.theaterId;
+  if (!theaterId) {
+    const defaultTheater = await Theater.findOne();
+    if (!defaultTheater) return next(new AppError('No theaters exist to assign this room to', 404));
+    theaterId = defaultTheater._id;
+  }
+  const theater = await Theater.findById(theaterId);
   if (!theater) return next(new AppError('Theater not found', 404));
+  
   const roomData = normalizeRoomData({ ...req.body, theater: theater._id });
   roomData.features = parseJsonField(roomData.features);
   roomData.amenities = parseJsonField(roomData.amenities);
@@ -90,44 +108,54 @@ exports.updateRoom = catchAsync(async (req, res, next) => {
   if (!room) return next(new AppError('Room not found', 404));
   const roomData = normalizeRoomData({ ...req.body });
   ['features', 'amenities', 'slots'].forEach((field) => { roomData[field] = parseJsonField(roomData[field], room[field]); });
-  const couple = Number(roomData.couple ?? room.couple);
-  const maximumMembers = Number(roomData.maximumMembers ?? room.maximumMembers);
-  if (maximumMembers < couple) return next(new AppError('Maximum Members must be greater than or equal to Couple.', 400));
+  // Only validate couple vs maximumMembers if couple is provided
+  if (roomData.couple !== undefined) {
+    const couple = Number(roomData.couple);
+    const maximumMembers = Number(roomData.maximumMembers ?? room.maximumMembers);
+    if (maximumMembers < couple) return next(new AppError('Maximum Members must be greater than or equal to Couple.', 400));
+    room.couple = couple;
+  } else if (roomData.hasOwnProperty('couple') && (roomData.couple === '' || roomData.couple === null)) {
+    // Explicitly clearing couple
+    room.couple = undefined;
+    room.markModified('couple');
+  }
 
   if (req.body.removeImage === 'true') {
     if (room.image?.publicId) {
       await deleteFromCloudinary(room.image.publicId).catch(console.error);
     }
-    room.set('image', null);
+    room.image = undefined;
+    room.markModified('image');
   }
 
   if (req.body.removeGalleryImages) {
     const idsToRemove = JSON.parse(req.body.removeGalleryImages);
-    // Delete from Cloudinary
     for (const id of idsToRemove) {
       if (id) await deleteFromCloudinary(id).catch(console.error);
     }
-    // Filter array
     const keepImages = room.galleryImages.filter(
       (img) => !idsToRemove.includes(img.publicId) && !idsToRemove.includes(img.url)
     );
-    room.set('galleryImages', keepImages);
+    room.galleryImages = keepImages;
+    room.markModified('galleryImages');
 
-    // If the primary image was removed, update it to the first remaining
     if (room.image && (idsToRemove.includes(room.image.publicId) || idsToRemove.includes(room.image.url))) {
-      room.set('image', keepImages.length > 0 ? keepImages[0].toObject() : null);
+      room.image = keepImages.length > 0 ? keepImages[0].toObject() : undefined;
+      room.markModified('image');
     }
   }
 
   await applyUploadedImages(req, roomData, room);
   
   if (roomData.galleryImages) {
-    room.set('galleryImages', roomData.galleryImages);
+    room.galleryImages = roomData.galleryImages;
+    room.markModified('galleryImages');
     delete roomData.galleryImages;
   }
   
   if (roomData.image) {
-    room.set('image', roomData.image);
+    room.image = roomData.image;
+    room.markModified('image');
     delete roomData.image;
   }
 

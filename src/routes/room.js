@@ -8,11 +8,13 @@ const { createRoomSchema, updateRoomSchema } = require('../validators/roomValida
 const router = express.Router();
 
 router.get('/theater/:theaterId', roomController.getRooms);
+router.get('/', roomController.getAllRooms);
 router.get('/:roomId/availability', roomController.getAvailability);
 router.get('/:id', roomController.getRoom);
 
 router.use(protect, restrictTo('admin', 'super-admin'));
 router.post('/theater/:theaterId', uploadMultiple('images', 10), validateRequest(createRoomSchema), roomController.createRoom);
+router.post('/', uploadMultiple('images', 10), validateRequest(createRoomSchema), roomController.createRoom);
 router.put('/:id', uploadMultiple('images', 10), validateRequest(updateRoomSchema), roomController.updateRoom);
 router.delete('/:id', roomController.deleteRoom);
 router.post('/:id/slots', roomController.createSlot);

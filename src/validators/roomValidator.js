@@ -17,7 +17,7 @@ const validateMemberRange = (value, helpers) => {
 const schema = Joi.object({
   name: Joi.string().min(2).max(100).required(),
   description: Joi.string().max(1000).allow(''),
-  couple: Joi.number().integer().positive().max(100).required(),
+  couple: Joi.number().integer().positive().max(100).optional().allow(null, ''),
   maximumMembers: Joi.number().integer().min(1).max(100).required(),
   price: Joi.number().min(0).required(),
   googleMapLink: Joi.string().uri().allow(''),
@@ -29,4 +29,4 @@ const schema = Joi.object({
 }).custom(validateMemberRange);
 
 exports.createRoomSchema = schema;
-exports.updateRoomSchema = schema.fork(['name', 'couple', 'maximumMembers', 'price'], (field) => field.optional());
+exports.updateRoomSchema = schema.fork(['name', 'maximumMembers', 'price'], (field) => field.optional());
