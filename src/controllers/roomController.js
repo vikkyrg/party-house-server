@@ -114,7 +114,7 @@ exports.updateRoom = catchAsync(async (req, res, next) => {
     const maximumMembers = Number(roomData.maximumMembers ?? room.maximumMembers);
     if (maximumMembers < couple) return next(new AppError('Maximum Members must be greater than or equal to Couple.', 400));
     room.couple = couple;
-  } else if (roomData.hasOwnProperty('couple') && (roomData.couple === '' || roomData.couple === null)) {
+  } else if (Object.prototype.hasOwnProperty.call(req.body, 'couple') && (req.body.couple === '' || req.body.couple === 'null' || req.body.couple === null)) {
     // Explicitly clearing couple
     room.couple = undefined;
     room.markModified('couple');
