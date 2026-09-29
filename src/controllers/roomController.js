@@ -93,8 +93,45 @@ exports.updateRoom = catchAsync(async (req, res, next) => {
   const couple = Number(roomData.couple ?? room.couple);
   const maximumMembers = Number(roomData.maximumMembers ?? room.maximumMembers);
   if (maximumMembers < couple) return next(new AppError('Maximum Members must be greater than or equal to Couple.', 400));
+
+  if (req.body.removeImage === 'true') {
+    if (room.image?.publicId) {
+      await deleteFromCloudinary(room.image.publicId).catch(console.error);
+    }
+    room.set('image', null);
+  }
+
+  if (req.body.removeGalleryImages) {
+    const idsToRemove = JSON.parse(req.body.removeGalleryImages);
+    // Delete from Cloudinary
+    for (const id of idsToRemove) {
+      if (id) await deleteFromCloudinary(id).catch(console.error);
+    }
+    // Filter array
+    const keepImages = room.galleryImages.filter(
+      (img) => !idsToRemove.includes(img.publicId) && !idsToRemove.includes(img.url)
+    );
+    room.set('galleryImages', keepImages);
+
+    // If the primary image was removed, update it to the first remaining
+    if (room.image && (idsToRemove.includes(room.image.publicId) || idsToRemove.includes(room.image.url))) {
+      room.set('image', keepImages.length > 0 ? keepImages[0].toObject() : null);
+    }
+  }
+
   await applyUploadedImages(req, roomData, room);
-  Object.assign(room, roomData);
+  
+  if (roomData.galleryImages) {
+    room.set('galleryImages', roomData.galleryImages);
+    delete roomData.galleryImages;
+  }
+  
+  if (roomData.image) {
+    room.set('image', roomData.image);
+    delete roomData.image;
+  }
+
+  room.set(roomData);
   await room.save();
   res.json({ success: true, data: room });
 });
