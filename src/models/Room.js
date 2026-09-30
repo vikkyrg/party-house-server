@@ -38,6 +38,7 @@ const RoomSchema = new mongoose.Schema(
     features: [{ type: String, trim: true }],
     amenities: [{ type: String, trim: true }],
     rating: { type: Number, default: 0, min: 0, max: 5 },
+    location: { type: String, trim: true },
     googleMapLink: String,
     slots: [slotSchema],
     isActive: { type: Boolean, default: true },
