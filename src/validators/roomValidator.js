@@ -17,6 +17,7 @@ const validateMemberRange = (value, helpers) => {
 const schema = Joi.object({
   name: Joi.string().min(2).max(100).required(),
   description: Joi.string().max(1000).allow(''),
+  location: Joi.string().max(200).allow(''),
   couple: Joi.number().integer().positive().max(100).optional().allow(null, ''),
   maximumMembers: Joi.number().integer().min(1).max(100).required(),
   price: Joi.number().min(0).required(),
