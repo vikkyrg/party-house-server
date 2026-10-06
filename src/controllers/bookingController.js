@@ -71,7 +71,23 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     return next(new AppError('Sorry, this time slot was just booked. Please choose another time slot.', 400));
   }
 
-  const theaterPrice = room.price;
+  // Dynamic Weekday / Weekend Pricing Calculation
+  const rawDateStr = String(bookingDate || date).split('T')[0];
+  const [bYear, bMonth, bDay] = rawDateStr.split('-').map((n) => parseInt(n, 10));
+  if (!bYear || !bMonth || !bDay || isNaN(bYear) || isNaN(bMonth) || isNaN(bDay)) {
+    return next(new AppError('Invalid booking date provided.', 400));
+  }
+  const dateObj = new Date(bYear, bMonth - 1, bDay);
+  const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 6 = Saturday
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+  const theaterPrice = isWeekend
+    ? (room.weekendPrice ?? room.weekdayPrice ?? room.price)
+    : (room.weekdayPrice ?? room.price);
+
+  if (theaterPrice === undefined || theaterPrice === null || theaterPrice <= 0) {
+    return next(new AppError('Room pricing configuration is missing or invalid.', 400));
+  }
   let addOnsTotal = 0;
   let cakePrice = 0;
   let processedCake = undefined;
