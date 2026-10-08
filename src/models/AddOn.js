@@ -11,7 +11,7 @@ const AddOnSchema = new mongoose.Schema(
     slug: { type: String, lowercase: true, unique: true },
     category: {
       type: String,
-      enum: ['Extra Decoration', 'Choose Gifts', 'Special Services'],
+      enum: ['Special Services'],
       required: [true, 'Category is required'],
     },
     description: { type: String, maxlength: 500 },

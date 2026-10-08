@@ -14,14 +14,9 @@ const parseJsonField = (value, fallback = []) => {
 const normalizeRoomData = (data) => {
   const normalized = { ...data };
   if (normalized.maximumMembers === undefined && normalized.capacity !== undefined) normalized.maximumMembers = normalized.capacity;
-  if (normalized.weekdayPricePerHour !== undefined && normalized.weekdayPrice === undefined) normalized.weekdayPrice = Number(normalized.weekdayPricePerHour);
-  if (normalized.weekendPricePerHour !== undefined && normalized.weekendPrice === undefined) normalized.weekendPrice = Number(normalized.weekendPricePerHour);
-  if (normalized.weekdayPrice === undefined && normalized.basePrice !== undefined) normalized.weekdayPrice = Number(normalized.basePrice);
-  if (normalized.weekendPrice === undefined && normalized.basePrice !== undefined) normalized.weekendPrice = Number(normalized.basePrice);
-  if (normalized.weekdayPrice === undefined && normalized.price !== undefined) normalized.weekdayPrice = Number(normalized.price);
-  if (normalized.weekendPrice === undefined && normalized.price !== undefined) normalized.weekendPrice = Number(normalized.price);
-  if (normalized.weekdayPrice !== undefined) normalized.weekdayPrice = Number(normalized.weekdayPrice);
-  if (normalized.weekendPrice !== undefined) normalized.weekendPrice = Number(normalized.weekendPrice);
+  if (normalized.price1Hour !== undefined) normalized.price1Hour = Number(normalized.price1Hour);
+  if (normalized.price2Hours !== undefined) normalized.price2Hours = Number(normalized.price2Hours);
+  if (normalized.price3Hours !== undefined) normalized.price3Hours = Number(normalized.price3Hours);
   // Handle optional couple: empty string means "not provided"
   if (normalized.couple === '' || normalized.couple === null || normalized.couple === 'null') {
     delete normalized.couple;
@@ -30,8 +25,6 @@ const normalizeRoomData = (data) => {
   delete normalized.basePrice;
   delete normalized.additionalGuestPrice;
   delete normalized.extraGuestPrice;
-  delete normalized.weekdayPricePerHour;
-  delete normalized.weekendPricePerHour;
   return normalized;
 };
 

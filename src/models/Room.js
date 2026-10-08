@@ -32,8 +32,9 @@ const RoomSchema = new mongoose.Schema(
     description: { type: String, default: '', maxlength: 1000 },
     couple: { type: Number, required: false, min: 1, max: 100 },
     maximumMembers: { type: Number, required: true, min: 1, max: 100 },
-    weekdayPrice: { type: Number, required: true, min: 0 },
-    weekendPrice: { type: Number, required: true, min: 0 },
+    price1Hour: { type: Number, required: true, min: 0 },
+    price2Hours: { type: Number, required: true, min: 0 },
+    price3Hours: { type: Number, required: true, min: 0 },
     image: imageSchema,
     galleryImages: [imageSchema],
     features: [{ type: String, trim: true }],
@@ -52,23 +53,16 @@ RoomSchema.virtual('theaterId').get(function () {
   return this.theater;
 });
 
-RoomSchema.virtual('weekdayPricePerHour').get(function () {
-  return this.weekdayPrice ?? this.price;
-});
-
-RoomSchema.virtual('weekendPricePerHour').get(function () {
-  return this.weekendPrice ?? this.price;
-});
-
 // Populate the new fields from legacy documents without rewriting old records.
 RoomSchema.pre('init', function (data) {
   if (data.maximumMembers === undefined && data.capacity !== undefined) data.maximumMembers = data.capacity;
   // couple is optional: do NOT assign a default if it was not saved in the DB
   // We intentionally leave data.couple as-is (undefined if not in DB)
-  if (data.weekdayPrice === undefined && data.price !== undefined) data.weekdayPrice = data.price;
-  if (data.weekendPrice === undefined && data.price !== undefined) data.weekendPrice = data.price;
-  if (data.weekdayPrice === undefined && data.basePrice !== undefined) data.weekdayPrice = data.basePrice;
-  if (data.weekendPrice === undefined && data.basePrice !== undefined) data.weekendPrice = data.basePrice;
+  if (data.price2Hours === undefined) {
+    data.price2Hours = data.weekdayPrice ?? data.price ?? data.basePrice ?? 0;
+  }
+  if (data.price1Hour === undefined) data.price1Hour = 0;
+  if (data.price3Hours === undefined) data.price3Hours = 0;
 });
 
 RoomSchema.index({ theater: 1, name: 1 }, { unique: true });

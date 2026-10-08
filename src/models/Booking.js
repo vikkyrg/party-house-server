@@ -28,6 +28,7 @@ const BookingSchema = new mongoose.Schema(
     },
     date: { type: Date, required: [true, 'Booking date is required'] },
     bookingDate: { type: Date },
+    duration: { type: Number, required: [true, 'Duration is required'] },
     timeSlot: { type: String, required: [true, 'Time slot is required'] },
     timeSlotId: { type: mongoose.Schema.Types.ObjectId },
     eventType: {
