@@ -14,6 +14,35 @@ const { sendSMS } = require('../services/smsService');
 const appConfig = require('../config/app');
 const { GST_RATE } = require('../utils/constants');
 
+const parseTimeToMinutes = (timeStr) => {
+  if (!timeStr) return 0;
+  const match = timeStr.trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!match) return 0;
+  let [_, hours, minutes, modifier] = match;
+  hours = parseInt(hours, 10);
+  if (hours === 12) hours = 0;
+  if (modifier.toUpperCase() === 'PM') hours += 12;
+  return hours * 60 + parseInt(minutes, 10);
+};
+
+const getSlotInterval = (slotStr) => {
+  const parts = slotStr.split('-');
+  if (parts.length >= 2) {
+    return {
+      start: parseTimeToMinutes(parts[0]),
+      end: parseTimeToMinutes(parts[1])
+    };
+  }
+  return null;
+};
+
+const doesOverlap = (slot1Str, slot2Str) => {
+  const s1 = getSlotInterval(slot1Str);
+  const s2 = getSlotInterval(slot2Str);
+  if (!s1 || !s2) return false;
+  return s1.start < s2.end && s1.end > s2.start;
+};
+
 exports.createBooking = catchAsync(async (req, res, next) => {
   const { theaterId, roomId, locationId, date, bookingDate, timeSlot, timeSlotId, eventTypeId, addOns, customerDetails, discountCode } =
     req.body;
@@ -59,17 +88,24 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     selectedCake = { document: selectedCake, size: selectedSize };
   }
 
-  // Prevent Double Booking
-  const existingBooking = await Booking.findOne({
-    room: roomId,
-    date: normalizedBookingDate,
-    timeSlot,
-    status: { $nin: ['cancelled', 'no-show', 'failed'] },
-  });
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  if (existingBooking) {
-    return next(new AppError('Sorry, this time slot was just booked. Please choose another time slot.', 400));
-  }
+  try {
+    // Prevent Double Booking with Overlap Logic
+    const activeBookings = await Booking.find({
+      room: roomId,
+      date: normalizedBookingDate,
+      status: { $nin: ['cancelled', 'no-show', 'failed'] },
+    }).session(session);
+
+    const isOverlap = activeBookings.some(b => doesOverlap(b.timeSlot, timeSlot));
+
+    if (isOverlap) {
+      await session.abortTransaction();
+      session.endSession();
+      return next(new AppError('Sorry, this time slot has just been booked. Please choose another time slot.', 400));
+    }
 
   const duration = parseInt(req.body.duration, 10);
   if (!duration || ![1, 2, 3].includes(duration)) {
@@ -129,7 +165,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
 
   let booking;
   try {
-    booking = await Booking.create({
+    const createdBookings = await Booking.create([{
       user: req.user._id,
       theater: theaterId,
       room: roomId,
@@ -148,10 +184,20 @@ exports.createBooking = catchAsync(async (req, res, next) => {
         kids
       },
       status: 'pending',
-    });
+    }], { session });
+
+    booking = createdBookings[0];
+
+    await User.findByIdAndUpdate(req.user._id, { $push: { bookings: booking._id } }, { session });
+    await Theater.findByIdAndUpdate(theaterId, { $inc: { totalBookings: 1 } }, { session });
+
+    await session.commitTransaction();
+    session.endSession();
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     if (error?.code === 11000) {
-      return next(new AppError('Sorry, this time slot was just booked. Please choose another time slot.', 400));
+      return next(new AppError('Sorry, this time slot has just been booked. Please choose another time slot.', 400));
     }
     throw error;
   }
@@ -161,9 +207,6 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     { path: 'eventType', select: 'name' },
     { path: 'addOns.addOn', select: 'name price category' },
   ]);
-
-  await User.findByIdAndUpdate(req.user._id, { $push: { bookings: booking._id } });
-  await Theater.findByIdAndUpdate(theaterId, { $inc: { totalBookings: 1 } });
 
   // Do not send SMS/Email until payment is complete (handled elsewhere), but left here to preserve existing flow
   try {
@@ -175,6 +218,15 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     });
   } catch(err) {
      logger.error('Failed to send email:', err);
+  }
+
+  } catch (error) {
+    // Already handled abortion in inner try-catch, but catch any outer errors just in case
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+      session.endSession();
+    }
+    return next(error);
   }
 
   res.status(201).json({
@@ -286,23 +338,21 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
   let allSlots = [];
   const configuredSlots = room.slots;
   if (configuredSlots && configuredSlots.length > 0) {
-    const parseTime = (timeStr) => {
-      if (!timeStr) return 0;
-      const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-      if (!match) return 0;
-      let [_, hours, minutes, modifier] = match;
-      hours = parseInt(hours, 10);
-      if (hours === 12) hours = 0;
-      if (modifier.toUpperCase() === 'PM') hours += 12;
-      return hours * 60 + parseInt(minutes, 10);
-    };
-
-    const sortedSlots = [...configuredSlots].filter((slot) => slot.isActive !== false).sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+    const sortedSlots = [...configuredSlots].filter((slot) => slot.isActive !== false).sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
     allSlots = sortedSlots.map(s => `${s.startTime} - ${s.endTime}`);
   }
 
-  const booked = bookedSlots.map((b) => b.timeSlot);
-  const available = allSlots.filter((slot) => !booked.includes(slot));
+  const available = [];
+  const booked = [];
+
+  allSlots.forEach(slot => {
+    const isBooked = bookedSlots.some(b => doesOverlap(b.timeSlot, slot));
+    if (isBooked) {
+      booked.push(slot);
+    } else {
+      available.push(slot);
+    }
+  });
 
   res.json({
     success: true,
@@ -319,15 +369,17 @@ exports.rescheduleBooking = catchAsync(async (req, res, next) => {
   const bookingDate = new Date(date);
   bookingDate.setHours(0, 0, 0, 0);
 
-  const conflict = await Booking.findOne({
+  const activeBookings = await Booking.find({
     _id: { $ne: booking._id },
     theater: booking.theater,
+    room: booking.room,
     date: bookingDate,
-    timeSlot,
-    status: { $nin: ['cancelled', 'no-show'] },
+    status: { $nin: ['cancelled', 'no-show', 'failed'] },
   });
 
-  if (conflict) return next(new AppError('Selected slot is not available', 400));
+  const conflict = activeBookings.some(b => doesOverlap(b.timeSlot, timeSlot));
+
+  if (conflict) return next(new AppError('Selected slot is not available due to overlap.', 400));
 
   booking.date = bookingDate;
   booking.timeSlot = timeSlot;

@@ -70,6 +70,35 @@ exports.getRoom = catchAsync(async (req, res, next) => {
   res.json({ success: true, data: room });
 });
 
+const parseTimeToMinutes = (timeStr) => {
+  if (!timeStr) return 0;
+  const match = timeStr.trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!match) return 0;
+  let [_, hours, minutes, modifier] = match;
+  hours = parseInt(hours, 10);
+  if (hours === 12) hours = 0;
+  if (modifier.toUpperCase() === 'PM') hours += 12;
+  return hours * 60 + parseInt(minutes, 10);
+};
+
+const getSlotInterval = (slotStr) => {
+  const parts = slotStr.split('-');
+  if (parts.length >= 2) {
+    return {
+      start: parseTimeToMinutes(parts[0]),
+      end: parseTimeToMinutes(parts[1])
+    };
+  }
+  return null;
+};
+
+const doesOverlap = (slot1Str, slot2Str) => {
+  const s1 = getSlotInterval(slot1Str);
+  const s2 = getSlotInterval(slot2Str);
+  if (!s1 || !s2) return false;
+  return s1.start < s2.end && s1.end > s2.start;
+};
+
 exports.getAvailability = catchAsync(async (req, res, next) => {
   const room = await Room.findById(req.params.roomId).populate('theater', 'name location isActive');
   if (!room || !room.isActive || !room.theater?.isActive) return next(new AppError('Room not found or inactive', 404));
@@ -77,10 +106,11 @@ exports.getAvailability = catchAsync(async (req, res, next) => {
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return next(new AppError('A valid date is required', 400));
   const bookingDate = new Date(`${date}T00:00:00.000Z`);
   const booked = await Booking.find({ room: room._id, date: bookingDate, status: { $nin: ['cancelled', 'no-show', 'failed'] } }).select('timeSlot');
-  const bookedSlots = new Set(booked.map((booking) => booking.timeSlot));
+  
   const slots = (room.slots || []).filter((slot) => slot.isActive !== false).map((slot) => {
     const time = `${slot.startTime} - ${slot.endTime}`;
-    const available = !bookedSlots.has(time);
+    const isBooked = booked.some((booking) => doesOverlap(booking.timeSlot, time));
+    const available = !isBooked;
     return { id: slot._id, time, startTime: slot.startTime, endTime: slot.endTime, available, status: available ? 'available' : 'booked' };
   });
   res.json({ success: true, data: { room: room.name, roomId: room._id, date, slots, availableSlots: slots.filter((slot) => slot.available), bookedSlots: slots.filter((slot) => !slot.available) } });
