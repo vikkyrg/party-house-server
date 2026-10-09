@@ -1,7 +1,7 @@
 const Booking = require('../models/Booking');
 const User = require('../models/User');
 const Theater = require('../models/Theater');
-require('../models/Room');
+const Room = require('../models/Room');
 const City = require('../models/City');
 const Location = require('../models/Location');
 const EventType = require('../models/EventType');
@@ -76,6 +76,11 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
     cancelledBookings,
     activeCities,
     revenueThisMonth,
+    totalRooms,
+    totalEventTypes,
+    totalAddOns,
+    totalServices,
+    totalGallery,
   ] = await Promise.all([
     Booking.countDocuments(),
     Booking.aggregate([
@@ -101,6 +106,11 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
       },
       { $group: { _id: null, total: { $sum: '$pricing.total' } } },
     ]),
+    Room.countDocuments({ isActive: true }),
+    EventType.countDocuments({ isActive: true }),
+    AddOn.countDocuments({ isActive: true }),
+    Service.countDocuments({ isActive: true }),
+    Gallery.countDocuments(),
   ]);
 
   res.json({
@@ -116,6 +126,11 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
       cancelledBookings,
       activeCities,
       revenueThisMonth: revenueThisMonth[0]?.total || 0,
+      totalRooms,
+      totalEventTypes,
+      totalAddOns,
+      totalServices,
+      totalGallery,
     },
   });
 });
