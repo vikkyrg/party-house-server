@@ -48,14 +48,14 @@ exports.getRooms = catchAsync(async (req, res, next) => {
   if (!theater) return next(new AppError('Theater not found', 404));
   const filter = { theater: theater._id };
   if (!req.query.includeInactive) filter.isActive = true;
-  const rooms = await Room.find(filter).sort({ sortOrder: 1, name: 1 });
+  const rooms = await Room.find(filter).sort({ name: 1 });
   res.json({ success: true, count: rooms.length, data: rooms });
 });
 
 exports.getAllRooms = catchAsync(async (req, res, next) => {
   const filter = {};
   if (!req.query.includeInactive) filter.isActive = true;
-  const rooms = await Room.find(filter).populate('theater', 'name').sort({ sortOrder: 1, name: 1 });
+  const rooms = await Room.find(filter).populate('theater', 'name').sort({ name: 1 });
   res.json({ success: true, count: rooms.length, data: rooms });
 });
 

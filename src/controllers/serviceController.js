@@ -20,7 +20,7 @@ exports.getServices = catchAsync(async (req, res, next) => {
     const sortBy = req.query.sort.split(',').join(' ');
     query = query.sort(sortBy);
   } else {
-    query = query.sort('sortOrder -createdAt');
+    query = query.sort('-createdAt');
   }
 
   const services = await query;

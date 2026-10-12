@@ -29,7 +29,6 @@ const schema = Joi.object({
   amenities: Joi.alternatives().try(Joi.string(), Joi.array().items(Joi.string())),
   slots: Joi.alternatives().try(Joi.string(), Joi.array().items(slot)),
   isActive: Joi.boolean(),
-  sortOrder: Joi.number().integer().min(0),
 }).custom(validateMemberRange);
 
 exports.createRoomSchema = schema;

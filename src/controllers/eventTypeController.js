@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const EventType = require('../models/EventType');
 const Theater = require('../models/Theater');
 const Booking = require('../models/Booking');
@@ -8,12 +9,14 @@ const { createAuditLog } = require('../services/auditService');
 
 exports.getEventTypes = catchAsync(async (req, res) => {
   const filter = req.query.includeInactive ? {} : { isActive: true };
-  const eventTypes = await EventType.find(filter).sort('sortOrder');
+  const eventTypes = await EventType.find(filter).sort({ createdAt: -1 });
   res.json({ success: true, count: eventTypes.length, data: eventTypes });
 });
 
 exports.getEventType = catchAsync(async (req, res, next) => {
-  const eventType = await EventType.findById(req.params.id);
+  const isObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+  const query = isObjectId ? { _id: req.params.id } : { slug: req.params.id };
+  const eventType = await EventType.findOne(query);
   if (!eventType) return next(new AppError('Event type not found', 404));
   res.json({ success: true, data: eventType });
 });
@@ -73,19 +76,16 @@ exports.deleteEventType = catchAsync(async (req, res, next) => {
   const eventType = await EventType.findById(req.params.id);
   if (!eventType) return next(new AppError('Event type not found', 404));
 
-  // Safe-deletion check
-  const theaterCount = await Theater.countDocuments({ eventTypes: eventType._id });
-  const bookingCount = await Booking.countDocuments({ eventType: eventType._id });
-  if (theaterCount > 0 || bookingCount > 0) {
-    return next(
-      new AppError(
-        `Cannot delete event type used by ${theaterCount} theaters and ${bookingCount} bookings. Deactivate instead.`,
-        400
-      )
-    );
-  }
+  // Remove eventType reference from theaters
+  await Theater.updateMany({ eventTypes: eventType._id }, { $pull: { eventTypes: eventType._id } });
 
-  if (eventType.image?.publicId) await deleteFromCloudinary(eventType.image.publicId);
+  if (eventType.image?.publicId) {
+    try {
+      await deleteFromCloudinary(eventType.image.publicId);
+    } catch (e) {
+      // ignore cloudinary errors on delete
+    }
+  }
   await eventType.deleteOne();
 
   await createAuditLog({

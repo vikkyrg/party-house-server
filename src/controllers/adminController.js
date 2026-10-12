@@ -695,7 +695,7 @@ exports.getAdminTheaters = catchAsync(async (req, res) => {
 });
 
 exports.getAdminEventTypes = catchAsync(async (req, res) => {
-  const eventTypes = await EventType.find().sort('sortOrder');
+  const eventTypes = await EventType.find().sort({ createdAt: -1 });
   res.json({ success: true, data: eventTypes });
 });
 
@@ -705,7 +705,7 @@ exports.getAdminAddOns = catchAsync(async (req, res) => {
   if (category) query.category = category;
   if (search) query.name = { $regex: search, $options: 'i' };
 
-  const addOns = await AddOn.find(query).sort('sortOrder');
+  const addOns = await AddOn.find(query).sort({ name: 1 });
   res.json({ success: true, data: addOns });
 });
 
@@ -723,7 +723,7 @@ exports.getAdminBanners = catchAsync(async (req, res) => {
 exports.getAdminTestimonials = catchAsync(async (req, res) => {
   const testimonials = await Testimonial.find()
     .populate('theater', 'name')
-    .sort('sortOrder');
+    .sort({ createdAt: -1 });
   res.json({ success: true, data: testimonials });
 });
 
@@ -732,7 +732,7 @@ exports.getAdminFAQs = catchAsync(async (req, res) => {
   const query = {};
   if (category) query.category = category;
 
-  const faqs = await FAQ.find(query).sort('sortOrder');
+  const faqs = await FAQ.find(query).sort({ createdAt: -1 });
   res.json({ success: true, data: faqs });
 });
 

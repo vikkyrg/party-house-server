@@ -39,7 +39,6 @@ const AddOnSchema = new mongoose.Schema(
     ],
     isActive: { type: Boolean, default: true },
     isPopular: { type: Boolean, default: false },
-    sortOrder: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

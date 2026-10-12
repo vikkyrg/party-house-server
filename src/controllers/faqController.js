@@ -7,7 +7,7 @@ exports.getFAQs = catchAsync(async (req, res) => {
   const filter = { isActive: true };
   if (req.query.category) filter.category = req.query.category;
 
-  const faqs = await FAQ.find(filter).sort('sortOrder');
+  const faqs = await FAQ.find(filter).sort({ createdAt: -1 });
   res.json({ success: true, count: faqs.length, data: faqs });
 });
 

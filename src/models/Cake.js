@@ -42,17 +42,12 @@ const cakeSchema = new mongoose.Schema({
       message: 'Cake sizes must be unique'
     }
   },
-  sortOrder: {
-    type: Number,
-    default: 0
-  },
   isActive: {
     type: Boolean,
     default: true
   }
 }, { timestamps: true });
 
-// Add index for sorting
-cakeSchema.index({ sortOrder: 1, createdAt: -1 });
+cakeSchema.index({ category: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Cake', cakeSchema);

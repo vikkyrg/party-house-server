@@ -20,7 +20,6 @@ const EventTypeSchema = new mongoose.Schema(
     basePrice: { type: Number, default: 0, min: 0 },
     duration: { type: Number, default: 2, min: 1 },
     isActive: { type: Boolean, default: true },
-    sortOrder: { type: Number, default: 0 },
     metaTitle: String,
     metaDescription: String,
   },

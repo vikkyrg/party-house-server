@@ -36,7 +36,6 @@ const TestimonialSchema = new mongoose.Schema(
       enum: ['google', 'instagram', 'website', 'manual'],
       default: 'manual',
     },
-    sortOrder: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

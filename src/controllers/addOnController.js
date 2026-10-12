@@ -8,7 +8,7 @@ exports.getAddOns = catchAsync(async (req, res) => {
   const filter = req.query.includeInactive ? {} : { isActive: true };
   if (req.query.category) filter.category = req.query.category;
 
-  const addOns = await AddOn.find(filter).sort('sortOrder');
+  const addOns = await AddOn.find(filter).sort({ name: 1 });
   res.json({ success: true, count: addOns.length, data: addOns });
 });
 
@@ -78,15 +78,27 @@ exports.deleteAddOn = catchAsync(async (req, res, next) => {
   const addOn = await AddOn.findById(req.params.id);
   if (!addOn) return next(new AppError('Add-on not found', 404));
 
-  // Safe-deletion check
-  const bookingCount = await Booking.countDocuments({ 'addOns.addOn': addOn._id });
-  if (bookingCount > 0) {
-    return next(
-      new AppError(
-        `Cannot delete add-on used in ${bookingCount} bookings. Deactivate instead.`,
-        400
-      )
+  // Preserve addOn name in existing bookings so historical records remain intact
+  try {
+    await Booking.updateMany(
+      { 'addOns.addOn': addOn._id },
+      { $set: { 'addOns.$[elem].variantName': addOn.name } },
+      { arrayFilters: [{ 'elem.addOn': addOn._id, 'elem.variantName': { $in: [null, '', undefined] } }] }
     );
+  } catch (err) {
+    // If updateMany arrayFilters not supported on older mongo, fallback to plain update
+    await Booking.updateMany(
+      { 'addOns.addOn': addOn._id },
+      { $set: { 'addOns.$.variantName': addOn.name } }
+    );
+  }
+
+  if (addOn.image?.publicId) {
+    try {
+      await deleteFromCloudinary(addOn.image.publicId);
+    } catch (e) {
+      // ignore cloudinary errors on delete
+    }
   }
 
   await addOn.deleteOne();

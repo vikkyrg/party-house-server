@@ -98,11 +98,10 @@ const seedDatabase = async () => {
     // Seed event types
     console.log('🎉 Seeding event types...');
     const seededEventTypes = await EventType.insertMany(
-      eventTypes.map((et, index) => ({
+      eventTypes.map((et) => ({
         ...et,
         slug: et.name.toLowerCase().replace(/\s+/g, '-'),
         isActive: true,
-        sortOrder: index
       }))
     );
     console.log(`✅ Seeded ${seededEventTypes.length} event types`);
@@ -110,11 +109,10 @@ const seedDatabase = async () => {
     // Seed add-ons
     console.log('🎁 Seeding add-ons...');
     const seededAddOns = await AddOn.insertMany(
-      addOns.map((addon, index) => ({
+      addOns.map((addon) => ({
         ...addon,
         slug: addon.name.toLowerCase().replace(/\s+/g, '-'),
         isActive: true,
-        sortOrder: index
       }))
     );
     console.log(`✅ Seeded ${seededAddOns.length} add-ons`);

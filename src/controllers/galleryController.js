@@ -20,7 +20,7 @@ exports.getGalleryImages = catchAsync(async (req, res, next) => {
     const sortBy = req.query.sort.split(',').join(' ');
     query = query.sort(sortBy);
   } else {
-    query = query.sort('sortOrder -createdAt');
+    query = query.sort('-createdAt');
   }
 
   const images = await query;

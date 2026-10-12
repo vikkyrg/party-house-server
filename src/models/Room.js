@@ -44,7 +44,6 @@ const RoomSchema = new mongoose.Schema(
     googleMapLink: String,
     slots: [slotSchema],
     isActive: { type: Boolean, default: true },
-    sortOrder: { type: Number, default: 0 },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
@@ -66,7 +65,7 @@ RoomSchema.pre('init', function (data) {
 });
 
 RoomSchema.index({ theater: 1, name: 1 }, { unique: true });
-RoomSchema.index({ theater: 1, isActive: 1, sortOrder: 1 });
+RoomSchema.index({ theater: 1, isActive: 1, name: 1 });
 
 RoomSchema.pre('save', function (next) {
   if (this.isModified('name') || !this.slug) this.slug = createSlug(this.name);

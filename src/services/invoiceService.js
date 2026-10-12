@@ -138,9 +138,10 @@ class InvoiceService {
       currentY += 15;
 
       booking.addOns.forEach((addon, _index) => {
+        const addonName = addon.addOn?.name || addon.variantName || 'Add-on';
         doc
           .font('Helvetica')
-          .text(`• ${addon.addOn.name} x ${addon.quantity}`, 60, currentY)
+          .text(`• ${addonName} x ${addon.quantity}`, 60, currentY)
           .text(`₹${addon.price * addon.quantity}`, 400, currentY, { align: 'right' });
         currentY += 18;
       });

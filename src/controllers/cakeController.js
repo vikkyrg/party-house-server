@@ -32,7 +32,7 @@ exports.getCakes = catchAsync(async (req, res) => {
     filter.$or = [{ category: 'standard' }, { category: { $exists: false } }];
   }
 
-  const cakes = await Cake.find(filter).sort('sortOrder');
+  const cakes = await Cake.find(filter).sort({ name: 1 });
   res.json({ success: true, count: cakes.length, data: cakes });
 });
 
@@ -97,16 +97,11 @@ exports.deleteCake = catchAsync(async (req, res, next) => {
   const cake = await Cake.findById(req.params.id);
   if (!cake) return next(new AppError('Cake not found', 404));
 
-  // Safe-deletion check
-  const bookingCount = await Booking.countDocuments({ 'cake.cakeId': cake._id });
-  if (bookingCount > 0) {
-    return next(
-      new AppError(
-        `Cannot delete cake used in ${bookingCount} bookings. Deactivate instead.`,
-        400
-      )
-    );
-  }
+  // Preserve cake name in existing bookings if needed
+  await Booking.updateMany(
+    { 'cake.cakeId': cake._id, 'cake.name': { $in: [null, '', undefined] } },
+    { $set: { 'cake.name': cake.name } }
+  );
 
   await cake.deleteOne();
 

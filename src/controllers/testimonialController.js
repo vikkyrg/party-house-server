@@ -7,7 +7,7 @@ exports.getTestimonials = catchAsync(async (req, res) => {
   const filter = { isActive: true };
   if (req.query.featured === 'true') filter.isFeatured = true;
 
-  const testimonials = await Testimonial.find(filter).populate('theater', 'name').sort('sortOrder');
+  const testimonials = await Testimonial.find(filter).populate('theater', 'name').sort({ createdAt: -1 });
 
   res.json({ success: true, count: testimonials.length, data: testimonials });
 });
