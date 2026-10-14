@@ -63,7 +63,10 @@ app.get('/health', (_req, res) => {
 });
 
 const apiVersion = process.env.API_VERSION || 'v1';
+const contactRoutes = require('./routes/contact');
+app.use('/api/contact', contactRoutes);
 app.use(`/api/${apiVersion}`, routes);
+
 
 app.all('*', (req, res) => {
   res.status(404).json({

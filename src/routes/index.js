@@ -22,6 +22,8 @@ const galleryRoutes = require('./galleryRoutes');
 const serviceRoutes = require('./serviceRoutes');
 const storyRoutes = require('./storyRoutes');
 
+const contactRoutes = require('./contact');
+
 const router = express.Router();
 
 router.use(healthRoutes);
@@ -46,5 +48,7 @@ router.use('/site-content', siteContentRoutes);
 router.use('/gallery', galleryRoutes);
 router.use('/services', serviceRoutes);
 router.use('/stories', storyRoutes);
+router.use('/contact', contactRoutes);
 
 module.exports = router;
+

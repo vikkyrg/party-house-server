@@ -40,7 +40,25 @@ router.get('/services', adminController.getAdminServices);
 router.get('/gallery', adminController.getAdminGallery);
 router.get('/stories', adminController.getAdminStories);
 
+const contactMessageController = require('../controllers/contactMessageController');
+const validateRequest = require('../middleware/validateRequest');
+const { updateContactMessageStatusSchema } = require('../validators/contactMessageValidator');
+
 // Audit Logs
 router.get('/audit-logs', adminController.getAuditLogs);
 
+// Contact Messages
+router.get('/contact-messages', contactMessageController.getAdminContactMessages);
+router.get('/contact-messages/unread-count', contactMessageController.getUnreadCount);
+router.patch('/contact-messages/mark-all-read', contactMessageController.markAllAsRead);
+router.get('/contact-messages/:id', contactMessageController.getContactMessageById);
+router.patch(
+  '/contact-messages/:id/status',
+  validateRequest(updateContactMessageStatusSchema),
+  contactMessageController.updateContactMessageStatus
+);
+router.delete('/contact-messages/:id', contactMessageController.deleteContactMessage);
+
 module.exports = router;
+
+

@@ -14,6 +14,7 @@ const AuditLog = require('../models/AuditLog');
 const Service = require('../models/Service');
 const Gallery = require('../models/Gallery');
 const Story = require('../models/Story');
+const ContactMessage = require('../models/ContactMessage');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const { sendEmail } = require('../services/emailService');
@@ -81,6 +82,7 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
     totalAddOns,
     totalServices,
     totalGallery,
+    unreadContactMessages,
   ] = await Promise.all([
     Booking.countDocuments(),
     Booking.aggregate([
@@ -111,6 +113,7 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
     AddOn.countDocuments({ isActive: true }),
     Service.countDocuments({ isActive: true }),
     Gallery.countDocuments(),
+    ContactMessage.countDocuments({ status: 'new' }),
   ]);
 
   res.json({
@@ -131,8 +134,10 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
       totalAddOns,
       totalServices,
       totalGallery,
+      unreadContactMessages,
     },
   });
+
 });
 
 // ─── Dashboard Charts ───────────────────────────────────────
