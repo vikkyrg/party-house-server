@@ -7,6 +7,8 @@ const Room = require('../models/Room');
 const Cake = require('../models/Cake');
 const AddOn = require('../models/AddOn');
 const User = require('../models/User');
+const EventType = require('../models/EventType');
+const Location = require('../models/Location');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const { sendEmail } = require('../services/emailService');
@@ -14,38 +16,37 @@ const { sendSMS } = require('../services/smsService');
 const appConfig = require('../config/app');
 const { GST_RATE } = require('../utils/constants');
 
-const parseTimeToMinutes = (timeStr) => {
-  if (!timeStr) return 0;
-  const match = timeStr.trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-  if (!match) return 0;
-  let [_, hours, minutes, modifier] = match;
-  hours = parseInt(hours, 10);
-  if (hours === 12) hours = 0;
-  if (modifier.toUpperCase() === 'PM') hours += 12;
-  return hours * 60 + parseInt(minutes, 10);
-};
-
-const getSlotInterval = (slotStr) => {
-  const parts = slotStr.split('-');
-  if (parts.length >= 2) {
-    return {
-      start: parseTimeToMinutes(parts[0]),
-      end: parseTimeToMinutes(parts[1])
-    };
-  }
-  return null;
-};
-
-const doesOverlap = (slot1Str, slot2Str) => {
-  const s1 = getSlotInterval(slot1Str);
-  const s2 = getSlotInterval(slot2Str);
-  if (!s1 || !s2) return false;
-  return s1.start < s2.end && s1.end > s2.start;
-};
+const {
+  parseTimeToMinutes,
+  getSlotInterval,
+  doesOverlap,
+  normalizeBookingDate,
+  formatDateToYMD,
+  getActiveBookingsFilter,
+} = require('../utils/dateUtils');
 
 exports.createBooking = catchAsync(async (req, res, next) => {
   const { theaterId, roomId, locationId, date, bookingDate, timeSlot, timeSlotId, eventTypeId, addOns, customerDetails, discountCode } =
     req.body;
+
+  let duration = parseInt(req.body.duration, 10);
+  if (!duration || ![1, 2, 3].includes(duration)) {
+    // If not explicitly provided, calculate duration from timeSlot (e.g. "10:30 AM - 12:30 PM" = 2 hours)
+    if (timeSlot && timeSlot.includes('-')) {
+      const parts = timeSlot.split('-').map(s => s.trim());
+      const s = parseTimeToMinutes(parts[0]);
+      const e = parseTimeToMinutes(parts[1]);
+      if (s !== undefined && e !== undefined && e > s) {
+        const diffHrs = Math.round((e - s) / 60);
+        if ([1, 2, 3].includes(diffHrs)) {
+          duration = diffHrs;
+        }
+      }
+    }
+    if (!duration || ![1, 2, 3].includes(duration)) {
+      duration = 2; // Default standard slot duration
+    }
+  }
 
   const theater = await Theater.findById(theaterId).populate('city');
   if (!theater || !theater.isActive) {
@@ -61,11 +62,9 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     return next(new AppError(`Maximum ${room.maximumMembers} members allowed for this room.`, 400));
   }
 
-  const normalizedBookingDate = new Date(bookingDate || date);
-  normalizedBookingDate.setHours(0, 0, 0, 0);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (Number.isNaN(normalizedBookingDate.getTime()) || normalizedBookingDate < today) {
+  const normalizedBookingDate = normalizeBookingDate(bookingDate || date);
+  const today = normalizeBookingDate(new Date());
+  if (!normalizedBookingDate || normalizedBookingDate < today) {
     return next(new AppError('Booking date must be today or a future date.', 400));
   }
 
@@ -88,37 +87,34 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     selectedCake = { document: selectedCake, size: selectedSize };
   }
 
+  let booking = null;
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    // Prevent Double Booking with Overlap Logic
-    const activeBookings = await Booking.find({
+    // Prevent Double Booking with Overlap Logic and Concurrency Protection
+    const activeFilter = getActiveBookingsFilter({
       room: roomId,
       date: normalizedBookingDate,
-      status: { $nin: ['cancelled', 'no-show', 'failed'] },
-    }).session(session);
+    });
 
-    const isOverlap = activeBookings.some(b => doesOverlap(b.timeSlot, timeSlot));
+    const activeBookings = await Booking.find(activeFilter).session(session);
+
+    const isOverlap = activeBookings.some((b) => doesOverlap(b.timeSlot, timeSlot));
 
     if (isOverlap) {
       await session.abortTransaction();
       session.endSession();
-      return next(new AppError('Sorry, this time slot has just been booked. Please choose another time slot.', 400));
+      return next(new AppError('This time slot has just been booked. Please select another available slot.', 409));
     }
-
-  const duration = parseInt(req.body.duration, 10);
-  if (!duration || ![1, 2, 3].includes(duration)) {
-    return next(new AppError('A valid duration (1, 2, or 3) is required.', 400));
-  }
 
   let theaterPrice = 0;
   if (duration === 1) theaterPrice = room.price1Hour;
   else if (duration === 2) theaterPrice = room.price2Hours;
   else if (duration === 3) theaterPrice = room.price3Hours;
 
-  if (theaterPrice === undefined || theaterPrice === null || theaterPrice <= 0) {
-    return next(new AppError('Room pricing configuration is missing or invalid.', 400));
+  if (!theaterPrice || theaterPrice <= 0) {
+    theaterPrice = room.price2Hours || room.weekdayPrice || room.price1Hour || room.price3Hours || 1299;
   }
   let addOnsTotal = 0;
   let cakePrice = 0;
@@ -137,6 +133,25 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     };
   }
 
+  const eventTypeDoc = await EventType.findById(eventTypeId);
+  if (!eventTypeDoc || !eventTypeDoc.isActive) {
+    return next(new AppError('Selected occasion/event type is not valid.', 400));
+  }
+
+  let locationDoc = null;
+  if (locationId || theater.location) {
+    locationDoc = await Location.findById(locationId || theater.location);
+  }
+
+  // Parse start and end time from timeSlot string (e.g. "10:00 AM - 01:00 PM")
+  let startTime = '';
+  let endTime = '';
+  if (timeSlot && timeSlot.includes('-')) {
+    const slotParts = timeSlot.split('-').map(s => s.trim());
+    startTime = slotParts[0] || '';
+    endTime = slotParts[1] || '';
+  }
+
   if (addOns?.length) {
     for (const addon of addOns) {
       const addOnDoc = await AddOn.findById(addon.id || addon.addOnId);
@@ -147,6 +162,8 @@ exports.createBooking = catchAsync(async (req, res, next) => {
         addOnsTotal += price * quantity;
         processedAddOns.push({
           addOn: addOnDoc._id,
+          name: addOnDoc.name,
+          variantName: addon.variantName || '',
           quantity,
           price,
         });
@@ -162,19 +179,27 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   const total = subtotal + tax - discount;
   const advanceAmount = 750;
   const balanceAmount = total > advanceAmount ? total - advanceAmount : 0;
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15-minute unpaid payment window
 
-  let booking;
   try {
     const createdBookings = await Booking.create([{
       user: req.user._id,
       theater: theaterId,
+      theaterName: theater.name,
+      location: locationDoc ? locationDoc._id : undefined,
+      locationName: locationDoc ? locationDoc.name : '',
       room: roomId,
+      roomName: room.name,
       city: theater.city?._id,
+      cityName: theater.city?.name || '',
       date: normalizedBookingDate,
       timeSlot,
       timeSlotId: timeSlotId || undefined,
+      startTime,
+      endTime,
       duration,
       eventType: eventTypeId,
+      eventTypeName: eventTypeDoc.name,
       cake: processedCake,
       addOns: processedAddOns,
       pricing: { theaterPrice, roomBasePrice: theaterPrice, addOnsTotal, cakePrice, subtotal, tax, discount, discountCode, total, advanceAmount, balanceAmount },
@@ -183,7 +208,15 @@ exports.createBooking = catchAsync(async (req, res, next) => {
         members,
         kids
       },
-      status: 'pending',
+      payment: {
+        status: 'pending',
+        provider: 'upi_qr',
+        method: 'upi',
+        amountPaid: 0,
+        currency: 'INR',
+      },
+      status: 'pending_payment',
+      expiresAt,
     }], { session });
 
     booking = createdBookings[0];
@@ -197,7 +230,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     await session.abortTransaction();
     session.endSession();
     if (error?.code === 11000) {
-      return next(new AppError('Sorry, this time slot has just been booked. Please choose another time slot.', 400));
+      return next(new AppError('This time slot has just been booked. Please select another available slot.', 409));
     }
     throw error;
   }
@@ -322,41 +355,70 @@ exports.cancelBooking = catchAsync(async (req, res, next) => {
 
 exports.checkAvailability = catchAsync(async (req, res, next) => {
   const { roomId, date } = req.query;
-  const bookingDate = new Date(date);
-  bookingDate.setHours(0, 0, 0, 0);
+  const bookingDate = normalizeBookingDate(date);
+  if (!bookingDate) return next(new AppError('A valid date is required (YYYY-MM-DD)', 400));
 
   const room = await Room.findById(roomId);
   const theater = room ? await Theater.findById(room.theater) : null;
   if (!room || !room.isActive || !theater || !theater.isActive) return next(new AppError('Room not found or inactive', 404));
 
-  const bookedSlots = await Booking.find({
+  const filter = getActiveBookingsFilter({
     room: roomId,
     date: bookingDate,
-    status: { $nin: ['cancelled', 'no-show', 'failed'] },
-  }).select('timeSlot');
-
-  let allSlots = [];
-  const configuredSlots = room.slots;
-  if (configuredSlots && configuredSlots.length > 0) {
-    const sortedSlots = [...configuredSlots].filter((slot) => slot.isActive !== false).sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
-    allSlots = sortedSlots.map(s => `${s.startTime} - ${s.endTime}`);
-  }
-
-  const available = [];
-  const booked = [];
-
-  allSlots.forEach(slot => {
-    const isBooked = bookedSlots.some(b => doesOverlap(b.timeSlot, slot));
-    if (isBooked) {
-      booked.push(slot);
-    } else {
-      available.push(slot);
-    }
   });
+
+  const bookedBookings = await Booking.find(filter).select('timeSlot status payment duration expiresAt');
+
+  const configuredSlots = (room.slots || [])
+    .filter((slot) => slot.isActive !== false)
+    .sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
+
+  const slots = configuredSlots.map((s) => {
+    const slotStr = `${s.startTime} - ${s.endTime}`;
+    const conflicting = bookedBookings.find((b) => doesOverlap(b.timeSlot, slotStr));
+    const available = !conflicting;
+
+    const interval = getSlotInterval(slotStr);
+    const durationHours = interval ? Math.round((interval.end - interval.start) / 60) : 2;
+
+    let reason = null;
+    if (!available && conflicting) {
+      if (conflicting.status === 'confirmed') {
+        reason = 'Booked and confirmed';
+      } else if (conflicting.status === 'pending_verification') {
+        reason = 'Payment submitted & under verification';
+      } else {
+        reason = 'Temporarily reserved';
+      }
+    }
+
+    return {
+      id: s._id,
+      _id: s._id,
+      time: slotStr,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      duration: durationHours,
+      available,
+      status: available ? 'available' : 'booked',
+      reason,
+    };
+  });
+
+  const availableSlots = slots.filter((s) => s.available);
+  const bookedSlots = slots.filter((s) => !s.available);
 
   res.json({
     success: true,
-    data: { date: bookingDate, availableSlots: available, bookedSlots: booked },
+    data: {
+      room: room.name,
+      roomId: room._id,
+      date: formatDateToYMD(date),
+      slots,
+      availableSlots: availableSlots.map((s) => s.time),
+      bookedSlots: bookedSlots.map((s) => s.time),
+      detailedSlots: slots,
+    },
   });
 });
 
@@ -366,20 +428,21 @@ exports.rescheduleBooking = catchAsync(async (req, res, next) => {
 
   if (!booking) return next(new AppError('Booking not found', 404));
 
-  const bookingDate = new Date(date);
-  bookingDate.setHours(0, 0, 0, 0);
+  const bookingDate = normalizeBookingDate(date);
+  if (!bookingDate) return next(new AppError('A valid date is required (YYYY-MM-DD)', 400));
 
-  const activeBookings = await Booking.find({
+  const filter = getActiveBookingsFilter({
     _id: { $ne: booking._id },
     theater: booking.theater,
     room: booking.room,
     date: bookingDate,
-    status: { $nin: ['cancelled', 'no-show', 'failed'] },
   });
 
-  const conflict = activeBookings.some(b => doesOverlap(b.timeSlot, timeSlot));
+  const activeBookings = await Booking.find(filter);
 
-  if (conflict) return next(new AppError('Selected slot is not available due to overlap.', 400));
+  const conflict = activeBookings.some((b) => doesOverlap(b.timeSlot, timeSlot));
+
+  if (conflict) return next(new AppError('Selected slot is not available due to overlap.', 409));
 
   booking.date = bookingDate;
   booking.timeSlot = timeSlot;
@@ -392,8 +455,13 @@ exports.rescheduleBooking = catchAsync(async (req, res, next) => {
 exports.downloadInvoice = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
-  const booking = await Booking.findById(id)
-    .populate('theater', 'name address')
+  const isObjectId = mongoose.isValidObjectId(id);
+  const query = isObjectId ? { $or: [{ _id: id }, { bookingId: id }] } : { bookingId: id };
+
+  const booking = await Booking.findOne(query)
+    .populate('theater', 'name address city')
+    .populate('room', 'name')
+    .populate('cake', 'name')
     .populate('eventType', 'name')
     .populate('addOns.addOn', 'name');
 
@@ -401,8 +469,10 @@ exports.downloadInvoice = catchAsync(async (req, res, next) => {
     return next(new AppError('Booking not found', 404));
   }
 
-  // Check authorization
-  if (booking.user.toString() !== req.user.id && req.user.role !== 'admin') {
+  // Check authorization (allow booking owner, admin, or super-admin)
+  const isOwner = booking.user && booking.user.toString() === req.user?._id?.toString();
+  const isAdminUser = ['admin', 'super-admin'].includes(req.user?.role);
+  if (!isOwner && !isAdminUser) {
     return next(new AppError('Not authorized to access this invoice', 403));
   }
 
@@ -410,7 +480,7 @@ exports.downloadInvoice = catchAsync(async (req, res, next) => {
   const invoicePath = await invoiceService.generateInvoice(booking);
 
   // Send file
-  res.download(invoicePath, `${booking.bookingId}-invoice.pdf`, (err) => {
+  res.download(invoicePath, `${booking.bookingId || 'booking'}-invoice.pdf`, (err) => {
     if (err) {
       logger.error('Error sending invoice:', err);
     }

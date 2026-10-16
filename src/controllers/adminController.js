@@ -20,43 +20,22 @@ const AppError = require('../utils/AppError');
 const { sendEmail } = require('../services/emailService');
 const { createAuditLog } = require('../services/auditService');
 
-const parseTimeToMinutes = (timeStr) => {
-  if (!timeStr) return 0;
-  const match = timeStr.trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-  if (!match) return 0;
-  let [_, hours, minutes, modifier] = match;
-  hours = parseInt(hours, 10);
-  if (hours === 12) hours = 0;
-  if (modifier.toUpperCase() === 'PM') hours += 12;
-  return hours * 60 + parseInt(minutes, 10);
-};
-
-const getSlotInterval = (slotStr) => {
-  const parts = slotStr.split('-');
-  if (parts.length >= 2) {
-    return {
-      start: parseTimeToMinutes(parts[0]),
-      end: parseTimeToMinutes(parts[1])
-    };
-  }
-  return null;
-};
-
-const doesOverlap = (slot1Str, slot2Str) => {
-  const s1 = getSlotInterval(slot1Str);
-  const s2 = getSlotInterval(slot2Str);
-  if (!s1 || !s2) return false;
-  return s1.start < s2.end && s1.end > s2.start;
-};
+const {
+  doesOverlap,
+  normalizeBookingDate,
+  getActiveBookingsFilter,
+} = require('../utils/dateUtils');
 
 // Valid booking status transitions
 const VALID_TRANSITIONS = {
-  pending: ['confirmed', 'cancelled'],
-  confirmed: ['in-progress', 'cancelled', 'no-show'],
-  'in-progress': ['completed', 'cancelled'],
-  completed: [],
-  cancelled: [],
-  'no-show': [],
+  pending: ['pending', 'pending_payment', 'pending_verification', 'confirmed', 'cancelled'],
+  pending_payment: ['pending', 'pending_payment', 'pending_verification', 'confirmed', 'cancelled'],
+  pending_verification: ['pending', 'pending_verification', 'confirmed', 'cancelled'],
+  confirmed: ['confirmed', 'in-progress', 'completed', 'cancelled', 'no-show'],
+  'in-progress': ['in-progress', 'completed', 'cancelled'],
+  completed: ['completed'],
+  cancelled: ['cancelled'],
+  'no-show': ['no-show'],
 };
 
 // ─── Dashboard ──────────────────────────────────────────────
@@ -83,6 +62,8 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
     totalServices,
     totalGallery,
     unreadContactMessages,
+    totalVerifiedAdvance,
+    completedBookings,
   ] = await Promise.all([
     Booking.countDocuments(),
     Booking.aggregate([
@@ -95,7 +76,7 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
       date: { $gte: today, $lt: tomorrow },
       status: { $nin: ['cancelled'] },
     }),
-    Booking.countDocuments({ status: 'pending' }),
+    Booking.countDocuments({ status: { $in: ['pending', 'pending_payment', 'pending_verification'] } }),
     Booking.countDocuments({ status: 'confirmed' }),
     Booking.countDocuments({ status: 'cancelled' }),
     City.countDocuments({ isActive: true }),
@@ -114,6 +95,24 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
     Service.countDocuments({ isActive: true }),
     Gallery.countDocuments(),
     ContactMessage.countDocuments({ status: 'new' }),
+    Booking.aggregate([
+      { $match: { 'payment.status': 'paid' } },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: {
+              $cond: [
+                { $gt: ['$payment.amountPaid', 0] },
+                '$payment.amountPaid',
+                { $ifNull: ['$pricing.advanceAmount', 750] }
+              ]
+            }
+          }
+        }
+      },
+    ]),
+    Booking.countDocuments({ status: 'completed' }),
   ]);
 
   res.json({
@@ -121,11 +120,13 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
     data: {
       totalBookings,
       totalRevenue: totalRevenue[0]?.total || 0,
+      totalVerifiedAdvance: totalVerifiedAdvance[0]?.total || 0,
       totalUsers,
       totalTheaters,
       todayBookings,
       pendingBookings,
       confirmedBookings,
+      completedBookings,
       cancelledBookings,
       activeCities,
       revenueThisMonth: revenueThisMonth[0]?.total || 0,
@@ -357,9 +358,24 @@ exports.getAllBookings = catchAsync(async (req, res) => {
   if (theater) query.theater = theater;
   if (eventType) query.eventType = eventType;
   if (dateFrom || dateTo) {
-    query.date = {};
-    if (dateFrom) query.date.$gte = new Date(dateFrom);
-    if (dateTo) query.date.$lte = new Date(dateTo);
+    const dateQuery = {};
+    if (dateFrom && dateFrom !== 'undefined' && dateFrom !== 'null') {
+      const parsedFrom = new Date(dateFrom);
+      if (!isNaN(parsedFrom.getTime())) {
+        parsedFrom.setHours(0, 0, 0, 0);
+        dateQuery.$gte = parsedFrom;
+      }
+    }
+    if (dateTo && dateTo !== 'undefined' && dateTo !== 'null') {
+      const parsedTo = new Date(dateTo);
+      if (!isNaN(parsedTo.getTime())) {
+        parsedTo.setHours(23, 59, 59, 999);
+        dateQuery.$lte = parsedTo;
+      }
+    }
+    if (Object.keys(dateQuery).length > 0) {
+      query.date = dateQuery;
+    }
   }
   if (search) {
     query.$or = [
@@ -375,7 +391,8 @@ exports.getAllBookings = catchAsync(async (req, res) => {
     .limit(safeLimit)
     .skip((page - 1) * safeLimit)
     .populate('user', 'name email phone')
-    .populate('theater', 'name city')
+    .populate('theater', 'name city address')
+    .populate('room', 'name couple maximumMembers')
     .populate('eventType', 'name')
     .populate('city', 'name')
     .lean();
@@ -400,11 +417,13 @@ exports.getBookingDetail = catchAsync(async (req, res, next) => {
   const booking = await Booking.findById(req.params.id)
     .populate('user', 'name email phone')
     .populate('theater', 'name images address city location')
+    .populate('room', 'name couple maximumMembers slots weekdayPrice weekendPrice')
     .populate('city', 'name code')
     .populate('eventType', 'name')
     .populate('addOns.addOn', 'name price category')
-    .populate('confirmedBy', 'name')
-    .populate('cancelledBy', 'name')
+    .populate('confirmedBy', 'name email')
+    .populate('cancelledBy', 'name email')
+    .populate('payment.verifiedBy', 'name email')
     .populate('review');
 
   if (!booking) return next(new AppError('Booking not found', 404));
@@ -412,14 +431,23 @@ exports.getBookingDetail = catchAsync(async (req, res, next) => {
 });
 
 exports.updateBookingStatus = catchAsync(async (req, res, next) => {
-  const { status, notes } = req.body;
+  let { status, notes } = req.body;
   const booking = await Booking.findById(req.params.id);
 
   if (!booking) return next(new AppError('Booking not found', 404));
 
+  // If action is reject, default status to cancelled
+  if (req.body.action === 'reject') {
+    status = 'cancelled';
+  } else if (req.body.action === 'verify') {
+    status = 'confirmed';
+  } else if (!status) {
+    status = booking.status;
+  }
+
   // Validate status transition
-  const allowed = VALID_TRANSITIONS[booking.status];
-  if (!allowed || !allowed.includes(status)) {
+  const allowed = VALID_TRANSITIONS[booking.status] || [];
+  if (booking.status !== status && !allowed.includes(status)) {
     return next(
       new AppError(
         `Cannot transition booking from '${booking.status}' to '${status}'`,
@@ -431,22 +459,60 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
   const before = { status: booking.status };
   
   if (['pending', 'confirmed', 'in-progress'].includes(status) && ['cancelled', 'no-show', 'failed'].includes(booking.status)) {
-    const activeBookings = await Booking.find({
+    const filter = getActiveBookingsFilter({
       _id: { $ne: booking._id },
       room: booking.room,
       date: booking.date,
-      status: { $nin: ['cancelled', 'no-show', 'failed'] },
     });
-    const isOverlap = activeBookings.some(b => doesOverlap(b.timeSlot, booking.timeSlot));
+    const activeBookings = await Booking.find(filter);
+    const isOverlap = activeBookings.some((b) => doesOverlap(b.timeSlot, booking.timeSlot));
     if (isOverlap) {
-      return next(new AppError(`Cannot update status to '${status}' because the time slot is currently booked by another active booking.`, 400));
+      return next(new AppError(`Cannot update status to '${status}' because the time slot is currently booked by another active booking.`, 409));
     }
   }
 
   booking.status = status;
   if (notes) booking.notes = notes;
 
-  if (status === 'confirmed') {
+  // Handle explicit verification action
+  if (req.body.action === 'verify' || (status === 'confirmed' && req.body.paymentStatus === 'paid')) {
+    booking.payment.status = 'paid';
+    booking.payment.amountPaid = booking.pricing?.advanceAmount || 750;
+    booking.payment.paidAt = new Date();
+    booking.payment.verifiedAt = new Date();
+    booking.payment.verifiedBy = req.user._id;
+    booking.status = 'confirmed';
+    booking.confirmedBy = req.user._id;
+    booking.confirmedAt = new Date();
+  } else if (req.body.action === 'reject') {
+    if (!req.body.rejectionReason || !req.body.rejectionReason.trim()) {
+      return next(new AppError('A rejection reason is mandatory when rejecting a payment.', 400));
+    }
+    booking.payment.status = 'rejected';
+    booking.payment.rejectedReason = req.body.rejectionReason.trim();
+    booking.status = 'cancelled';
+    booking.cancelledBy = req.user._id;
+    booking.cancelledAt = new Date();
+    booking.cancellationReason = `Payment verification rejected: ${req.body.rejectionReason.trim()}`;
+  } else if (status === 'confirmed') {
+    // A booking must not become confirmed until its required advance payment has been verified
+    const isPaymentPaid = booking.payment?.status === 'paid' || req.body.paymentStatus === 'paid';
+    if (!isPaymentPaid) {
+      return next(
+        new AppError(
+          'Cannot confirm booking: Required advance payment has not been verified yet.',
+          400
+        )
+      );
+    }
+    if (req.body.paymentStatus === 'paid' && booking.payment.status !== 'paid') {
+      booking.payment.status = 'paid';
+      booking.payment.amountPaid = booking.pricing?.advanceAmount || 750;
+      booking.payment.paidAt = new Date();
+      booking.payment.verifiedAt = new Date();
+      booking.payment.verifiedBy = req.user._id;
+      if (req.body.paymentMethod) booking.payment.method = req.body.paymentMethod;
+    }
     booking.confirmedBy = req.user._id;
     booking.confirmedAt = new Date();
   }
@@ -457,6 +523,25 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
     booking.cancelledBy = req.user._id;
     booking.cancelledAt = new Date();
     booking.cancellationReason = notes || 'Cancelled by admin';
+    // If booking was paid and refund is requested
+    if (req.body.processRefund && booking.payment?.status === 'paid') {
+      booking.payment.status = 'refunded';
+      booking.payment.refundedAt = new Date();
+      booking.payment.refundAmount = booking.payment.amountPaid || booking.pricing?.advanceAmount || 750;
+    }
+  }
+
+  // Update payment status independently if specified
+  if (req.body.paymentStatus && !['confirmed'].includes(status) && req.body.action !== 'reject') {
+    booking.payment.status = req.body.paymentStatus;
+    if (req.body.paymentStatus === 'paid') {
+      booking.payment.amountPaid = booking.payment.amountPaid || booking.pricing?.advanceAmount || 750;
+      booking.payment.paidAt = booking.payment.paidAt || new Date();
+      booking.payment.verifiedAt = booking.payment.verifiedAt || new Date();
+      booking.payment.verifiedBy = req.user._id;
+    } else if (req.body.paymentStatus === 'refunded') {
+      booking.payment.refundedAt = new Date();
+    }
   }
 
   await booking.save();
@@ -833,9 +918,24 @@ exports.getAuditLogs = catchAsync(async (req, res) => {
   if (userId) query.user = userId;
   if (search) query.modelId = search;
   if (dateFrom || dateTo) {
-    query.createdAt = {};
-    if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
-    if (dateTo) query.createdAt.$lte = new Date(dateTo);
+    const createdQuery = {};
+    if (dateFrom && dateFrom !== 'undefined' && dateFrom !== 'null') {
+      const parsedFrom = new Date(dateFrom);
+      if (!isNaN(parsedFrom.getTime())) {
+        parsedFrom.setHours(0, 0, 0, 0);
+        createdQuery.$gte = parsedFrom;
+      }
+    }
+    if (dateTo && dateTo !== 'undefined' && dateTo !== 'null') {
+      const parsedTo = new Date(dateTo);
+      if (!isNaN(parsedTo.getTime())) {
+        parsedTo.setHours(23, 59, 59, 999);
+        createdQuery.$lte = parsedTo;
+      }
+    }
+    if (Object.keys(createdQuery).length > 0) {
+      query.createdAt = createdQuery;
+    }
   }
 
   const logs = await AuditLog.find(query)
@@ -862,9 +962,24 @@ exports.exportBookings = catchAsync(async (req, res) => {
   if (status) query.status = status;
   if (city) query.city = city;
   if (dateFrom || dateTo) {
-    query.date = {};
-    if (dateFrom) query.date.$gte = new Date(dateFrom);
-    if (dateTo) query.date.$lte = new Date(dateTo);
+    const dateQuery = {};
+    if (dateFrom && dateFrom !== 'undefined' && dateFrom !== 'null') {
+      const parsedFrom = new Date(dateFrom);
+      if (!isNaN(parsedFrom.getTime())) {
+        parsedFrom.setHours(0, 0, 0, 0);
+        dateQuery.$gte = parsedFrom;
+      }
+    }
+    if (dateTo && dateTo !== 'undefined' && dateTo !== 'null') {
+      const parsedTo = new Date(dateTo);
+      if (!isNaN(parsedTo.getTime())) {
+        parsedTo.setHours(23, 59, 59, 999);
+        dateQuery.$lte = parsedTo;
+      }
+    }
+    if (Object.keys(dateQuery).length > 0) {
+      query.date = dateQuery;
+    }
   }
 
   const bookings = await Booking.find(query)
@@ -878,26 +993,32 @@ exports.exportBookings = catchAsync(async (req, res) => {
     'Booking ID',
     'Customer',
     'Email',
+    'Phone',
     'Theater',
     'City',
     'Date',
     'Time Slot',
     'Status',
     'Payment Status',
-    'Total',
+    'Total Amount',
+    'Advance Paid',
+    'UPI Ref',
   ];
 
   const rows = bookings.map((b) => [
     b.bookingId,
-    b.customerDetails?.name || b.user?.name,
-    b.customerDetails?.email || b.user?.email,
-    b.theater?.name,
-    b.city?.name,
-    new Date(b.date).toISOString().split('T')[0],
-    b.timeSlot,
+    `"${b.customerDetails?.name || b.user?.name || ''}"`,
+    `"${b.customerDetails?.email || b.user?.email || ''}"`,
+    `"${b.customerDetails?.phone || ''}"`,
+    `"${b.theater?.name || b.theaterName || ''}"`,
+    `"${b.city?.name || b.cityName || ''}"`,
+    b.date ? new Date(b.date).toISOString().split('T')[0] : '',
+    `"${b.timeSlot || ''}"`,
     b.status,
     b.payment?.status,
-    b.pricing?.total,
+    b.pricing?.total || 0,
+    b.payment?.amountPaid || (b.payment?.status === 'paid' ? (b.pricing?.advanceAmount || 750) : 0),
+    `"${b.payment?.upiTransactionId || ''}"`,
   ]);
 
   const csv = [headers, ...rows].map((row) => row.join(',')).join('\n');

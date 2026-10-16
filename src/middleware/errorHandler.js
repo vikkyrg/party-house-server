@@ -35,9 +35,9 @@ const sendErrorProd = (err, res) => {
     });
   } else {
     logger.error('ERROR', err);
-    res.status(500).json({
+    res.status(err.statusCode || 500).json({
       success: false,
-      message: 'Something went wrong!',
+      message: err.message || 'Something went wrong!',
     });
   }
 };
@@ -45,6 +45,12 @@ const sendErrorProd = (err, res) => {
 module.exports = (err, req, res, _next) => {
   err.statusCode = err.statusCode || 500;
   err.status = err.status || 'error';
+
+  if (err.statusCode >= 400 && err.statusCode < 500) {
+    logger.warn(`[${req.method}] ${req.originalUrl} - ${err.statusCode}: ${err.message}`);
+  } else {
+    logger.error(`[${req.method}] ${req.originalUrl} - ${err.statusCode}: ${err.message}`, err);
+  }
 
   if (process.env.NODE_ENV === 'development') {
     let error = { ...err, message: err.message };

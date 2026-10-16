@@ -52,46 +52,41 @@ exports.getTheater = catchAsync(async (req, res, next) => {
   res.json({ success: true, data: theater });
 });
 
+const {
+  doesOverlap,
+  normalizeBookingDate,
+  formatDateToYMD,
+  getActiveBookingsFilter,
+  parseTimeToMinutes,
+} = require('../utils/dateUtils');
+
 exports.getTheaterAvailability = catchAsync(async (req, res, next) => {
   const theater = await Theater.findById(req.params.id);
   if (!theater) return next(new AppError('Theater not found', 404));
 
   const { date } = req.query;
-  if (!date) return next(new AppError('Date is required', 400));
+  const bookingDate = normalizeBookingDate(date);
+  if (!bookingDate) return next(new AppError('Date is required (YYYY-MM-DD)', 400));
 
-  const bookingDate = new Date(date);
-  bookingDate.setHours(0, 0, 0, 0);
-
-  const bookedSlots = await Booking.find({
+  const filter = getActiveBookingsFilter({
     theater: req.params.id,
     date: bookingDate,
-    status: { $nin: ['cancelled', 'no-show'] },
-  }).select('timeSlot status');
+  });
 
-  const bookedSlotIds = bookedSlots.map(b => b.timeSlot);
+  const bookedSlots = await Booking.find(filter).select('timeSlot status');
 
   let standardSlots = [];
   if (theater.slots && theater.slots.length > 0) {
-    const parseTime = (timeStr) => {
-      if (!timeStr) return 0;
-      const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-      if (!match) return 0;
-      let [_, hours, minutes, modifier] = match;
-      hours = parseInt(hours, 10);
-      if (hours === 12) hours = 0;
-      if (modifier.toUpperCase() === 'PM') hours += 12;
-      return hours * 60 + parseInt(minutes, 10);
-    };
-
-    const sortedSlots = [...theater.slots].sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
+    const sortedSlots = [...theater.slots].sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
 
     standardSlots = sortedSlots.map(s => {
       const slotStr = `${s.startTime} - ${s.endTime}`;
-      return { id: slotStr, time: slotStr, available: !bookedSlotIds.includes(slotStr) };
+      const isBooked = bookedSlots.some(b => doesOverlap(b.timeSlot, slotStr));
+      return { id: slotStr, time: slotStr, available: !isBooked };
     });
   }
 
-  res.json({ success: true, data: { theater: theater.name, date: bookingDate, slots: standardSlots } });
+  res.json({ success: true, data: { theater: theater.name, date: formatDateToYMD(date), slots: standardSlots } });
 });
 
 exports.getTheaterReviews = catchAsync(async (req, res, next) => {
