@@ -23,6 +23,7 @@ const serviceRoutes = require('./serviceRoutes');
 const storyRoutes = require('./storyRoutes');
 
 const contactRoutes = require('./contact');
+const newsletterRoutes = require('./newsletter');
 
 const router = express.Router();
 
@@ -49,6 +50,7 @@ router.use('/gallery', galleryRoutes);
 router.use('/services', serviceRoutes);
 router.use('/stories', storyRoutes);
 router.use('/contact', contactRoutes);
+router.use('/newsletter', newsletterRoutes);
 
 module.exports = router;
 
