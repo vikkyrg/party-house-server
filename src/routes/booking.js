@@ -9,18 +9,18 @@ const {
 } = require('../validators/bookingValidator');
 const rateLimit = require('express-rate-limit');
 
-// Create booking-specific rate limiter
+// Create booking-specific rate limiter with abuse protection
+// Allows up to 30 requests per hour per IP/user to permit legitimate multi-step browsing and bulk bookings
 const bookingLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 3, // 3 bookings per hour
+  max: 30, // 30 booking creations per hour
   message: {
     success: false,
-    message: 'You can only create 3 bookings per hour. Please contact support for bulk bookings.',
+    message: 'Rate limit exceeded. Please try again later or contact support.',
   },
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {
-    // Use user ID if logged in, otherwise IP
     return req.user?.id || req.ip;
   },
 });
@@ -33,14 +33,29 @@ router.get(
   bookingController.checkAvailability
 );
 
-router.use(protect);
+// Public / Guest / Customer booking creation endpoints (uses resolveCustomerAuth)
+const { resolveCustomerAuth } = require('../middleware/auth');
+const { bulkBookingSchema } = require('../validators/bookingValidator');
 
 router.post(
   '/',
+  resolveCustomerAuth,
   bookingLimiter,
   validateRequest(createBookingSchema),
   bookingController.createBooking
 );
+
+router.post(
+  '/bulk',
+  resolveCustomerAuth,
+  bookingLimiter,
+  validateRequest(bulkBookingSchema),
+  bookingController.createBulkBooking
+);
+
+// Authenticated booking management routes
+router.use(protect);
+
 router.get('/', bookingController.getUserBookings);
 router.get('/my', bookingController.getMyBookings);
 router.get('/:id', bookingController.getBooking);

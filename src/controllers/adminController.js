@@ -76,7 +76,30 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
       date: { $gte: today, $lt: tomorrow },
       status: { $nin: ['cancelled'] },
     }),
-    Booking.countDocuments({ status: { $in: ['pending', 'pending_payment', 'pending_verification'] } }),
+    Booking.countDocuments({
+      status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+      $nor: [
+        {
+          status: { $in: ['pending', 'pending_payment'] },
+          'payment.status': { $in: ['pending', 'failed'] },
+          holdExpiresAt: { $exists: true, $ne: null, $lt: new Date() },
+        },
+        {
+          status: { $in: ['pending', 'pending_payment'] },
+          'payment.status': { $in: ['pending', 'failed'] },
+          expiresAt: { $exists: true, $ne: null, $lt: new Date() },
+        },
+        {
+          status: { $in: ['pending', 'pending_payment'] },
+          'payment.status': { $in: ['pending', 'failed'] },
+          $and: [
+            { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
+            { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
+          ],
+          createdAt: { $lt: new Date(Date.now() - 10 * 60 * 1000) },
+        },
+      ],
+    }),
     Booking.countDocuments({ status: 'confirmed' }),
     Booking.countDocuments({ status: 'cancelled' }),
     City.countDocuments({ isActive: true }),
@@ -383,6 +406,35 @@ exports.getAllBookings = catchAsync(async (req, res) => {
       { 'customerDetails.phone': { $regex: search, $options: 'i' } },
       { 'customerDetails.email': { $regex: search, $options: 'i' } },
       { bookingId: { $regex: search, $options: 'i' } },
+      { bulkBookingId: { $regex: search, $options: 'i' } },
+    ];
+  }
+
+  // Pending unpaid bookings should appear only while their 10-minute hold is active.
+  // Unless the admin specifically queries for 'cancelled' bookings, exclude expired unpaid holds from active listing.
+  if (status !== 'cancelled') {
+    const now = new Date();
+    const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
+    query.$nor = [
+      {
+        status: { $in: ['pending', 'pending_payment'] },
+        'payment.status': { $in: ['pending', 'failed'] },
+        holdExpiresAt: { $exists: true, $ne: null, $lt: now },
+      },
+      {
+        status: { $in: ['pending', 'pending_payment'] },
+        'payment.status': { $in: ['pending', 'failed'] },
+        expiresAt: { $exists: true, $ne: null, $lt: now },
+      },
+      {
+        status: { $in: ['pending', 'pending_payment'] },
+        'payment.status': { $in: ['pending', 'failed'] },
+        $and: [
+          { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
+          { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
+        ],
+        createdAt: { $lt: tenMinutesAgo },
+      },
     ];
   }
 
@@ -476,6 +528,28 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
 
   // Handle explicit verification action
   if (req.body.action === 'verify' || (status === 'confirmed' && req.body.paymentStatus === 'paid')) {
+    // If booking hold had expired, ensure no other active reservation has taken the slot
+    const now = new Date();
+    const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
+    const wasExpired = ['pending', 'pending_payment'].includes(booking.status) &&
+      (['pending', 'failed'].includes(booking.payment?.status)) &&
+      ((booking.holdExpiresAt && booking.holdExpiresAt < now) ||
+       (booking.expiresAt && booking.expiresAt < now) ||
+       (!booking.holdExpiresAt && !booking.expiresAt && booking.createdAt < tenMinutesAgo));
+
+    if (wasExpired) {
+      const filter = getActiveBookingsFilter({
+        _id: { $ne: booking._id },
+        room: booking.room,
+        date: booking.date,
+      });
+      const activeBookings = await Booking.find(filter);
+      const isOverlap = activeBookings.some((b) => doesOverlap(b.timeSlot, booking.timeSlot));
+      if (isOverlap) {
+        return next(new AppError('Cannot confirm this booking: The hold has expired and this slot has already been reserved by another customer.', 409));
+      }
+    }
+
     booking.payment.status = 'paid';
     booking.payment.amountPaid = booking.pricing?.advanceAmount || 750;
     booking.payment.paidAt = new Date();
@@ -982,6 +1056,32 @@ exports.exportBookings = catchAsync(async (req, res) => {
     }
   }
 
+  if (status !== 'cancelled') {
+    const now = new Date();
+    const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
+    query.$nor = [
+      {
+        status: { $in: ['pending', 'pending_payment'] },
+        'payment.status': { $in: ['pending', 'failed'] },
+        holdExpiresAt: { $exists: true, $ne: null, $lt: now },
+      },
+      {
+        status: { $in: ['pending', 'pending_payment'] },
+        'payment.status': { $in: ['pending', 'failed'] },
+        expiresAt: { $exists: true, $ne: null, $lt: now },
+      },
+      {
+        status: { $in: ['pending', 'pending_payment'] },
+        'payment.status': { $in: ['pending', 'failed'] },
+        $and: [
+          { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
+          { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
+        ],
+        createdAt: { $lt: tenMinutesAgo },
+      },
+    ];
+  }
+
   const bookings = await Booking.find(query)
     .populate('theater', 'name')
     .populate('user', 'name email')
@@ -991,6 +1091,7 @@ exports.exportBookings = catchAsync(async (req, res) => {
 
   const headers = [
     'Booking ID',
+    'Bulk Booking ID',
     'Customer',
     'Email',
     'Phone',
@@ -1007,6 +1108,7 @@ exports.exportBookings = catchAsync(async (req, res) => {
 
   const rows = bookings.map((b) => [
     b.bookingId,
+    b.bulkBookingId || '',
     `"${b.customerDetails?.name || b.user?.name || ''}"`,
     `"${b.customerDetails?.email || b.user?.email || ''}"`,
     `"${b.customerDetails?.phone || ''}"`,

@@ -104,13 +104,21 @@ exports.getAvailability = catchAsync(async (req, res, next) => {
       const durationHours = interval ? Math.round((interval.end - interval.start) / 60) : 2;
 
       let reason = null;
+      let slotState = 'available';
+      let isTemporarilyHeld = false;
+
       if (!available && conflictingBooking) {
-        if (conflictingBooking.status === 'confirmed') {
-          reason = 'Booked and confirmed';
-        } else if (conflictingBooking.status === 'pending_verification') {
+        if (conflictingBooking.status === 'confirmed' || conflictingBooking.payment?.status === 'paid') {
+          reason = 'Sold Out';
+          slotState = 'sold_out';
+        } else if (conflictingBooking.status === 'pending_verification' || conflictingBooking.payment?.status === 'submitted') {
           reason = 'Payment submitted & under verification';
+          slotState = 'held';
+          isTemporarilyHeld = true;
         } else {
-          reason = 'Temporarily reserved';
+          reason = 'Temporarily reserved — try again shortly';
+          slotState = 'held';
+          isTemporarilyHeld = true;
         }
       }
 
@@ -123,6 +131,8 @@ exports.getAvailability = catchAsync(async (req, res, next) => {
         duration: durationHours,
         available,
         status: available ? 'available' : 'booked',
+        slotState,
+        isTemporarilyHeld,
         reason,
       };
     });

@@ -50,6 +50,56 @@ exports.createBookingSchema = Joi.object({
   discountCode: Joi.string(),
 });
 
+exports.bulkBookingSchema = Joi.object({
+  customerDetails: Joi.object({
+    name: Joi.string().trim().min(2).required(),
+    phone: Joi.string()
+      .trim()
+      .custom((value, helpers) => {
+        const cleaned = value.replace(/[\s\-()]/g, '').replace(/^(\+91|91|0)/, '');
+        if (/^[6-9]\d{9}$/.test(cleaned) || /^\d{10}$/.test(cleaned)) {
+          return cleaned;
+        }
+        return helpers.message('Please provide a valid 10-digit mobile number');
+      })
+      .required(),
+    email: Joi.string().email().required(),
+    members: Joi.number().integer().min(1).default(1),
+    kids: Joi.number().integer().min(0).default(0),
+    specialRequests: Joi.string().max(500).allow('', null),
+  }).required(),
+  discountCode: Joi.string().optional(),
+  bookings: Joi.array()
+    .min(1)
+    .max(10)
+    .items(
+      Joi.object({
+        theaterId: Joi.string().hex().length(24).required(),
+        roomId: Joi.string().hex().length(24).required(),
+        locationId: Joi.string().hex().length(24).optional(),
+        date: Joi.date().iso().required(),
+        timeSlot: Joi.string().required(),
+        timeSlotId: Joi.string().hex().length(24).optional(),
+        duration: Joi.number().integer().valid(1, 2, 3).default(2).optional(),
+        eventTypeId: Joi.string().hex().length(24).required(),
+        cake: Joi.object({
+          cakeId: Joi.string().hex().length(24).required(),
+          size: Joi.string().required(),
+        }).allow(null),
+        addOns: Joi.array().items(
+          Joi.object({
+            addOnId: Joi.string().hex().length(24),
+            id: Joi.string().hex().length(24),
+            quantity: Joi.number().integer().min(1).default(1),
+          }).or('addOnId', 'id')
+        ),
+        members: Joi.number().integer().min(1).optional(),
+        kids: Joi.number().integer().min(0).optional(),
+      })
+    )
+    .required(),
+});
+
 exports.cancelBookingSchema = Joi.object({
   reason: Joi.string().max(500).required(),
 });

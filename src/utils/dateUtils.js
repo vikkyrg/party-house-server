@@ -77,20 +77,44 @@ const normalizeBookingDate = (dateInput) => {
   return new Date(`${dateStr}T00:00:00.000Z`);
 };
 
+const BOOKING_HOLD_DURATION_MINUTES = 10;
+const BOOKING_HOLD_DURATION_MS = BOOKING_HOLD_DURATION_MINUTES * 60 * 1000;
+
 /**
  * Build MongoDB filter for active bookings that occupy a room/theater on a given date.
  * Excludes cancelled, no-show, failed, and expired unpaid reservations.
+ * If a pending unpaid booking has holdExpiresAt or expiresAt, it expires when that timestamp passes.
+ * If it lacks an expiration timestamp, it expires 10 minutes after createdAt.
  */
 const getActiveBookingsFilter = (baseFilter = {}) => {
   const now = new Date();
+  const tenMinutesAgo = new Date(now.getTime() - BOOKING_HOLD_DURATION_MS);
+
   return {
     ...baseFilter,
     status: { $in: ['pending', 'pending_payment', 'pending_verification', 'confirmed', 'in-progress', 'completed'] },
     $nor: [
+      // 1. Pending unpaid bookings with explicit holdExpiresAt that has expired
       {
         status: { $in: ['pending', 'pending_payment'] },
         'payment.status': { $in: ['pending', 'failed'] },
-        expiresAt: { $lt: now },
+        holdExpiresAt: { $exists: true, $ne: null, $lt: now },
+      },
+      // 2. Pending unpaid bookings with expiresAt that has expired
+      {
+        status: { $in: ['pending', 'pending_payment'] },
+        'payment.status': { $in: ['pending', 'failed'] },
+        expiresAt: { $exists: true, $ne: null, $lt: now },
+      },
+      // 3. Old pending unpaid bookings missing explicit expiry timestamps older than 10 minutes
+      {
+        status: { $in: ['pending', 'pending_payment'] },
+        'payment.status': { $in: ['pending', 'failed'] },
+        $and: [
+          { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
+          { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
+        ],
+        createdAt: { $lt: tenMinutesAgo },
       },
     ],
   };
@@ -112,6 +136,8 @@ const formatDateToYMD = (dateInput) => {
 };
 
 module.exports = {
+  BOOKING_HOLD_DURATION_MINUTES,
+  BOOKING_HOLD_DURATION_MS,
   parseTimeToMinutes,
   getSlotInterval,
   doesOverlap,

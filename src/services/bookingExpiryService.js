@@ -1,24 +1,38 @@
 const Booking = require('../models/Booking');
 const logger = require('../utils/logger');
+const { BOOKING_HOLD_DURATION_MS } = require('../utils/dateUtils');
 
 /**
- * Release pending bookings that were abandoned and passed their expiration window (15 mins),
- * provided payment has not been initiated or confirmed.
+ * Release pending bookings that were abandoned and passed their 10-minute hold expiration window,
+ * provided payment has not been initiated/submitted or confirmed.
+ * Handles holdExpiresAt, expiresAt, and legacy bookings without expiry timestamps (older than 10 minutes).
  */
 const cleanupExpiredBookings = async () => {
   try {
     const now = new Date();
-    // Find bookings that are still pending, not paid/processing, and older than expiresAt
+    const tenMinutesAgo = new Date(now.getTime() - (BOOKING_HOLD_DURATION_MS || 10 * 60 * 1000));
+
+    // Match unpaid pending bookings that have expired
     const result = await Booking.updateMany(
       {
         status: { $in: ['pending', 'pending_payment'] },
         'payment.status': { $in: ['pending', 'failed'] },
-        expiresAt: { $lte: now },
+        $or: [
+          { holdExpiresAt: { $exists: true, $ne: null, $lte: now } },
+          { expiresAt: { $exists: true, $ne: null, $lte: now } },
+          {
+            $and: [
+              { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
+              { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
+              { createdAt: { $lte: tenMinutesAgo } },
+            ],
+          },
+        ],
       },
       {
         $set: {
           status: 'cancelled',
-          cancellationReason: 'Booking reservation expired due to uncompleted advance payment.',
+          cancellationReason: 'Booking reservation expired due to uncompleted advance payment within 10-minute hold window.',
           cancelledAt: now,
         },
       }

@@ -120,6 +120,7 @@ const BookingSchema = new mongoose.Schema(
       index: true,
     },
     expiresAt: { type: Date, index: true },
+    holdExpiresAt: { type: Date, index: true },
     confirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     confirmedAt: Date,
     cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -128,6 +129,11 @@ const BookingSchema = new mongoose.Schema(
     completedAt: Date,
     review: { type: mongoose.Schema.Types.ObjectId, ref: 'Review' },
     notes: { type: String, maxlength: 1000 },
+    // Bulk Booking Group Support
+    isBulkBooking: { type: Boolean, default: false, index: true },
+    bulkBookingId: { type: String, index: true }, // Shared reference across the bulk group e.g. CS-BULK-20261017-001
+    bulkBookingTotal: { type: Number },
+    bulkBookingAdvance: { type: Number },
   },
   { timestamps: true }
 );
@@ -153,6 +159,11 @@ BookingSchema.pre('validate', async function (next) {
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const count = await this.constructor.countDocuments();
     this.bookingId = `${prefix}-${date}-${String(count + 1).padStart(3, '0')}`;
+  }
+  if (this.expiresAt && !this.holdExpiresAt) {
+    this.holdExpiresAt = this.expiresAt;
+  } else if (this.holdExpiresAt && !this.expiresAt) {
+    this.expiresAt = this.holdExpiresAt;
   }
   next();
 });

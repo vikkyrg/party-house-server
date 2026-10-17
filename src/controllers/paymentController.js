@@ -40,18 +40,24 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
   }
 
   const now = new Date();
+  const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
+  const isHoldExpired =
+    (booking.holdExpiresAt && booking.holdExpiresAt < now) ||
+    (booking.expiresAt && booking.expiresAt < now) ||
+    (!booking.holdExpiresAt && !booking.expiresAt && booking.createdAt && booking.createdAt < tenMinutesAgo);
+
   // Check if booking has already been cancelled or expired
   if (
     booking.status === 'cancelled' ||
-    (booking.expiresAt && booking.expiresAt < now && ['pending', 'pending_payment'].includes(booking.status))
+    (isHoldExpired && ['pending', 'pending_payment'].includes(booking.status))
   ) {
     if (booking.status !== 'cancelled') {
       booking.status = 'cancelled';
-      booking.cancellationReason = 'Booking reservation expired due to uncompleted advance payment.';
+      booking.cancellationReason = 'Booking reservation expired due to uncompleted advance payment within 10-minute hold window.';
       booking.cancelledAt = now;
       await booking.save();
     }
-    return next(new AppError('This reservation has expired because the 15-minute payment window closed. Please select an available slot and reserve again.', 409));
+    return next(new AppError('This reservation has expired because the 10-minute hold window closed. Please select an available slot and reserve again.', 409));
   }
 
   // Ensure no other active confirmed or submitted booking has claimed this slot in the meantime
@@ -72,19 +78,35 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
   }
 
   // Save UPI transaction details
-  booking.payment.status = 'submitted';
-  booking.payment.method = 'upi';
-  booking.payment.provider = 'upi_qr';
-  booking.payment.upiTransactionId = trimmedRef;
-  booking.payment.submittedAt = new Date();
-  
-  // Transition booking to pending_verification
-  booking.status = 'pending_verification';
+  const updatePayload = {
+    'payment.status': 'submitted',
+    'payment.method': 'upi',
+    'payment.provider': 'upi_qr',
+    'payment.upiTransactionId': trimmedRef,
+    'payment.submittedAt': new Date(),
+    status: 'pending_verification',
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours protection for admin review
+    holdExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  };
 
-  // Extend the expiration window so the pending reservation is protected while admin verifies
-  booking.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours protection for admin review
+  booking.payment.status = updatePayload['payment.status'];
+  booking.payment.method = updatePayload['payment.method'];
+  booking.payment.provider = updatePayload['payment.provider'];
+  booking.payment.upiTransactionId = updatePayload['payment.upiTransactionId'];
+  booking.payment.submittedAt = updatePayload['payment.submittedAt'];
+  booking.status = updatePayload.status;
+  booking.expiresAt = updatePayload.expiresAt;
+  booking.holdExpiresAt = updatePayload.holdExpiresAt;
 
   await booking.save();
+
+  // If this booking is part of a bulk group, also update all other entries in the group
+  if (booking.isBulkBooking && booking.bulkBookingId) {
+    await Booking.updateMany(
+      { bulkBookingId: booking.bulkBookingId, _id: { $ne: booking._id } },
+      { $set: updatePayload }
+    );
+  }
 
   res.json({
     success: true,
@@ -92,6 +114,8 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
     data: {
       bookingId: booking._id,
       bookingReference: booking.bookingId,
+      isBulkBooking: !!booking.isBulkBooking,
+      bulkBookingId: booking.bulkBookingId || null,
       status: booking.status,
       paymentStatus: booking.payment.status,
       upiTransactionId: booking.payment.upiTransactionId,
@@ -114,18 +138,34 @@ exports.checkPaymentStatus = catchAsync(async (req, res, next) => {
     return next(new AppError('Not authorized', 403));
   }
 
+  const now = new Date();
+  const effectiveExpiry = booking.holdExpiresAt || booking.expiresAt || new Date(new Date(booking.createdAt).getTime() + 10 * 60 * 1000);
+  const isExpired = ['pending', 'pending_payment'].includes(booking.status) && ['pending', 'failed'].includes(booking.payment?.status) && effectiveExpiry < now;
+
+  let bulkEntries = undefined;
+  if (booking.isBulkBooking && booking.bulkBookingId) {
+    bulkEntries = await Booking.find({ bulkBookingId: booking.bulkBookingId })
+      .select('bookingId roomName theaterName date timeSlot status payment.status')
+      .lean();
+  }
+
   res.json({
     success: true,
     data: {
       bookingId: booking._id,
       bookingReference: booking.bookingId,
-      status: booking.status,
+      isBulkBooking: !!booking.isBulkBooking,
+      bulkBookingId: booking.bulkBookingId || null,
+      bulkEntries,
+      status: isExpired ? 'cancelled' : booking.status,
       paymentStatus: booking.payment?.status,
       upiTransactionId: booking.payment?.upiTransactionId,
       amountPaid: booking.payment?.amountPaid || 0,
       paidAt: booking.payment?.paidAt,
       rejectedReason: booking.payment?.rejectedReason,
-      expiresAt: booking.expiresAt,
+      expiresAt: booking.expiresAt || effectiveExpiry,
+      holdExpiresAt: booking.holdExpiresAt || effectiveExpiry,
+      isExpired,
     },
   });
 });
