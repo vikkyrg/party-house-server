@@ -25,11 +25,19 @@ const schema = Joi.object({
   price2Hours: Joi.number().min(0).required(),
   price3Hours: Joi.number().min(0).required(),
   googleMapLink: Joi.string().uri().allow(''),
+  screenSize: Joi.string().max(100).allow('', null).optional(),
+  pictureQuality: Joi.string().max(255).allow('', null).optional(),
+  soundQuality: Joi.string().max(255).allow('', null).optional(),
   features: Joi.alternatives().try(Joi.string(), Joi.array().items(Joi.string())),
   amenities: Joi.alternatives().try(Joi.string(), Joi.array().items(Joi.string())),
   slots: Joi.alternatives().try(Joi.string(), Joi.array().items(slot)),
+  media: Joi.any().optional(),
+  mediaOrder: Joi.any().optional(),
+  removeMediaIds: Joi.any().optional(),
+  removeGalleryImages: Joi.any().optional(),
+  removeImage: Joi.any().optional(),
   isActive: Joi.boolean(),
-}).custom(validateMemberRange);
+}).custom(validateMemberRange).unknown(true);
 
 exports.createRoomSchema = schema;
 exports.updateRoomSchema = schema.fork(['name', 'maximumMembers', 'price'], (field) => field.optional());
