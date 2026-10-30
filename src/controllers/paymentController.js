@@ -1,3 +1,4 @@
+const { createBookingNotification } = require('../services/bookingNotificationService');
 const PDFDocument = require('pdfkit');
 const Booking = require('../models/Booking');
 const catchAsync = require('../utils/catchAsync');

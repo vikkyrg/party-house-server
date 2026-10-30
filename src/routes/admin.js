@@ -1,5 +1,6 @@
 const express = require('express');
 const adminController = require('../controllers/adminController');
+const addOnController = require('../controllers/addOnController');
 const { protect, restrictTo } = require('../middleware/auth');
 
 const router = express.Router();
@@ -32,6 +33,7 @@ router.get('/locations', adminController.getAdminLocations);
 router.get('/theaters', adminController.getAdminTheaters);
 router.get('/event-types', adminController.getAdminEventTypes);
 router.get('/addons', adminController.getAdminAddOns);
+router.put('/addons/reorder', addOnController.reorderAddOns);
 router.get('/banners', adminController.getAdminBanners);
 router.get('/testimonials', adminController.getAdminTestimonials);
 router.get('/faqs', adminController.getAdminFAQs);
@@ -58,6 +60,15 @@ router.patch(
   contactMessageController.updateContactMessageStatus
 );
 router.delete('/contact-messages/:id', contactMessageController.deleteContactMessage);
+
+
+// Booking Notifications
+const bookingNotificationController = require('../controllers/bookingNotificationController');
+router.get('/booking-notifications', bookingNotificationController.getAdminBookingNotifications);
+router.get('/booking-notifications/unread-count', bookingNotificationController.getUnreadCount);
+router.patch('/booking-notifications/mark-all-read', bookingNotificationController.markAllAsRead);
+router.patch('/booking-notifications/:id/read', bookingNotificationController.markAsRead);
+router.patch('/booking-notifications/booking/:bookingId/read', bookingNotificationController.markAsReadByBookingId);
 
 module.exports = router;
 

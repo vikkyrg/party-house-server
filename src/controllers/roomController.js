@@ -48,14 +48,14 @@ exports.getRooms = catchAsync(async (req, res, next) => {
   if (!theater) return next(new AppError('Theater not found', 404));
   const filter = { theater: theater._id };
   if (!req.query.includeInactive) filter.isActive = true;
-  const rooms = await Room.find(filter).sort({ name: 1 });
+  const rooms = await Room.find(filter).sort({ displayOrder: 1, createdAt: 1, name: 1 });
   res.json({ success: true, count: rooms.length, data: rooms });
 });
 
 exports.getAllRooms = catchAsync(async (req, res, next) => {
   const filter = {};
   if (!req.query.includeInactive) filter.isActive = true;
-  const rooms = await Room.find(filter).populate('theater', 'name').sort({ name: 1 });
+  const rooms = await Room.find(filter).populate('theater', 'name').sort({ displayOrder: 1, createdAt: 1, name: 1 });
   res.json({ success: true, count: rooms.length, data: rooms });
 });
 
@@ -168,6 +168,15 @@ exports.createRoom = catchAsync(async (req, res, next) => {
   roomData.amenities = parseJsonField(roomData.amenities);
   roomData.slots = parseJsonField(roomData.slots);
   await applyUploadedImages(req, roomData);
+
+  // Assign next displayOrder by default if not explicitly provided
+  if (roomData.displayOrder === undefined) {
+    const highestOrderRoom = await Room.findOne().sort({ displayOrder: -1 }).select('displayOrder');
+    roomData.displayOrder = highestOrderRoom && typeof highestOrderRoom.displayOrder === 'number' 
+      ? highestOrderRoom.displayOrder + 1 
+      : 0;
+  }
+
   const room = await Room.create(roomData);
   res.status(201).json({ success: true, data: room });
 });
@@ -275,4 +284,24 @@ exports.deleteSlot = catchAsync(async (req, res, next) => {
   slot.deleteOne();
   await room.save();
   res.json({ success: true, message: 'Time slot deleted successfully' });
+});
+
+exports.reorderRooms = catchAsync(async (req, res, next) => {
+  const { roomIds } = req.body;
+  if (!Array.isArray(roomIds) || roomIds.length === 0) {
+    return next(new AppError('roomIds array is required', 400));
+  }
+
+  // Update displayOrder for each room in bulk
+  const bulkOps = roomIds.map((id, index) => ({
+    updateOne: {
+      filter: { _id: id },
+      update: { $set: { displayOrder: index } },
+    },
+  }));
+
+  await Room.bulkWrite(bulkOps);
+
+  const rooms = await Room.find({}).populate('theater', 'name').sort({ displayOrder: 1, createdAt: 1, name: 1 });
+  res.json({ success: true, message: 'Rooms reordered successfully', data: rooms });
 });

@@ -1,3 +1,4 @@
+const { createBookingNotification } = require('../services/bookingNotificationService');
 const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const invoiceService = require('../services/invoiceService');
@@ -220,6 +221,14 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       const addOnDoc = await AddOn.findById(addon.id || addon.addOnId);
       if (addOnDoc?.isActive) {
         let price = addOnDoc.price || 0;
+        if (duration === 1 && addOnDoc.price1Hour !== undefined) price = addOnDoc.price1Hour;
+        else if (duration === 2 && addOnDoc.price2Hours !== undefined) price = addOnDoc.price2Hours;
+        else if (duration === 3 && addOnDoc.price3Hours !== undefined) price = addOnDoc.price3Hours;
+        else if (addOnDoc.pricing) {
+          if (duration === 1 && addOnDoc.pricing.oneHour !== undefined) price = addOnDoc.pricing.oneHour;
+          else if (duration === 2 && addOnDoc.pricing.twoHours !== undefined) price = addOnDoc.pricing.twoHours;
+          else if (duration === 3 && addOnDoc.pricing.threeHours !== undefined) price = addOnDoc.pricing.threeHours;
+        }
         
         const quantity = addon.quantity || 1;
         addOnsTotal += price * quantity;
@@ -332,6 +341,12 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     return next(error);
   }
 
+  // Trigger Admin Notification for New Booking
+  createBookingNotification({
+    booking,
+    type: 'new_booking',
+  }).catch(() => {});
+
   res.status(201).json({
     success: true,
     message: 'Booking created successfully',
@@ -419,6 +434,13 @@ exports.cancelBooking = catchAsync(async (req, res, next) => {
   } catch (err) {
     logger.error('Failed to send cancellation email', err);
   }
+
+  // Trigger Admin Notification for Cancelled Booking
+  createBookingNotification({
+    booking,
+    type: 'cancelled',
+    message: reason ? `Booking #${booking.bookingId} was cancelled: ${reason}` : undefined,
+  }).catch(() => {});
 
   res.json({ success: true, message: 'Booking cancelled successfully', data: booking });
 });
@@ -733,7 +755,15 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
         const doc = addOnMap.get(aid);
         if (doc) {
           const quantity = parseInt(itemAddOn.quantity, 10) || 1;
-          const price = doc.price || 0;
+          let price = doc.price || 0;
+          if (duration === 1 && doc.price1Hour !== undefined) price = doc.price1Hour;
+          else if (duration === 2 && doc.price2Hours !== undefined) price = doc.price2Hours;
+          else if (duration === 3 && doc.price3Hours !== undefined) price = doc.price3Hours;
+          else if (doc.pricing) {
+            if (duration === 1 && doc.pricing.oneHour !== undefined) price = doc.pricing.oneHour;
+            else if (duration === 2 && doc.pricing.twoHours !== undefined) price = doc.pricing.twoHours;
+            else if (duration === 3 && doc.pricing.threeHours !== undefined) price = doc.pricing.threeHours;
+          }
           addOnsTotal += price * quantity;
           processedAddOns.push({ addOn: doc._id, quantity, price });
         }

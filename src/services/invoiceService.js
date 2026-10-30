@@ -103,32 +103,53 @@ class InvoiceService {
 
   drawHeader(doc, startY) {
     const leftX = 30;
-    const rightX = 310;
+    const rightX = 350;
     const pageWidth = 535; // 595 - 60 (margins: left 30, right 30)
 
-    // Company Header Left Side - RIO PARTY HOUSE
+    // Navbar Brand Logo Assets
+    const logoPath = path.resolve(__dirname, '../../../client/public/logo.png');
+    const adminLogoPath = path.resolve(__dirname, '../../../admin/public/logo.png');
+    const resolvedLogo = fs.existsSync(logoPath) ? logoPath : (fs.existsSync(adminLogoPath) ? adminLogoPath : null);
+
+    const logoWidth = 66;
+    const logoHeight = 44; // aspect ratio matches logo.png
+
+    if (resolvedLogo) {
+      try {
+        doc.image(resolvedLogo, leftX, startY, { fit: [logoWidth, logoHeight], align: 'left', valign: 'center' });
+      } catch (err) {
+        logger.error('Failed to embed logo image:', err);
+      }
+    }
+
+    const textLeftX = resolvedLogo ? leftX + logoWidth + 12 : leftX;
+    const infoWidth = rightX - textLeftX - 10; // ~242 pt available before right title
+
+    // Company Header Beside Logo - RIO PARTY HOUSE
     doc.fillColor('#1a1c21');
-    doc.font('AppFont-Bold').fontSize(18).text('RIO PARTY HOUSE', leftX, startY);
+    doc.font('AppFont-Bold').fontSize(16).text('RIO PARTY HOUSE', textLeftX, startY);
 
-    doc.font('AppFont').fontSize(9).fillColor('#4b5563');
-    const addressLine1 = '#7, Dinnur Main Road, Ganesh Block, RT Nagar, Bangalore - 560032.';
-    const addressLine2 = 'Suzuki Showroom Building, 3rd Floor.';
+    // Business Address
+    doc.font('AppFont').fontSize(8.5).fillColor('#4b5563');
+    const addressLine1 = 'No 7, 3rd Floor, Dinnur Main Road, RT Nagar - Bangalore 560032';
+    doc.text(addressLine1, textLeftX, doc.y + 3, { width: infoWidth, lineGap: 2 });
+
+    // Contact Number (positioned dynamically below address with clear spacing)
+    doc.font('AppFont-Bold').fontSize(8.5).fillColor('#8c5211');
     const contactLine = 'Contact Number: 81478 97771';
+    doc.text(contactLine, textLeftX, doc.y + 4, { width: infoWidth });
 
-    doc.text(addressLine1, leftX, startY + 22, { width: 300 });
-    doc.text(addressLine2, leftX, startY + 34, { width: 300 });
-    doc.font('AppFont-Bold').fillColor('#8c5211').text(contactLine, leftX, startY + 46, { width: 300 });
-
-    // Right Side: BOOKING INVOICE title only (removed subtitle and website url)
-    doc.font('AppFont-Bold').fontSize(18).fillColor('#8c5211').text('BOOKING INVOICE', rightX, startY + 12, {
+    // Right Side: BOOKING INVOICE title
+    doc.font('AppFont-Bold').fontSize(17).fillColor('#8c5211').text('BOOKING INVOICE', rightX, startY + 10, {
       align: 'right',
-      width: 255,
+      width: pageWidth - (rightX - leftX),
     });
 
-    const dividerY = startY + 64;
-    doc.strokeColor('#d1d5db').lineWidth(0.8).moveTo(leftX, dividerY).lineTo(leftX + pageWidth, dividerY).stroke();
+    const headerBottomY = Math.max(doc.y, startY + logoHeight);
+    const dividerY = headerBottomY + 10;
+    doc.strokeColor('#e5e7eb').lineWidth(0.8).moveTo(leftX, dividerY).lineTo(leftX + pageWidth, dividerY).stroke();
 
-    return dividerY + 10;
+    return dividerY + 12;
   }
 
   drawBookingAndCustomerDetails(doc, booking, startY) {

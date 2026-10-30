@@ -13,6 +13,7 @@ router.get('/:roomId/availability', roomController.getAvailability);
 router.get('/:id', roomController.getRoom);
 
 router.use(protect, restrictTo('admin', 'super-admin'));
+router.put('/reorder', roomController.reorderRooms);
 router.post('/theater/:theaterId', uploadMultiple('images', 10), validateRequest(createRoomSchema), roomController.createRoom);
 router.post('/', uploadMultiple('images', 10), validateRequest(createRoomSchema), roomController.createRoom);
 router.put('/:id', uploadMultiple('images', 10), validateRequest(updateRoomSchema), roomController.updateRoom);

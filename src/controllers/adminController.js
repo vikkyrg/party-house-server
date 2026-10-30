@@ -1,3 +1,4 @@
+const { createBookingNotification } = require('../services/bookingNotificationService');
 const Booking = require('../models/Booking');
 const User = require('../models/User');
 const Theater = require('../models/Theater');
@@ -640,6 +641,30 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
     // Email failure should not block status update
   }
 
+  // Booking Notification on status update
+  if (booking.status === 'confirmed') {
+    createBookingNotification({
+      booking,
+      type: 'payment_verified',
+      title: `Booking #${booking.bookingId} Confirmed`,
+      message: `Booking #${booking.bookingId} has been confirmed.`,
+    }).catch(() => {});
+  } else if (booking.status === 'cancelled') {
+    createBookingNotification({
+      booking,
+      type: 'cancelled',
+      title: `Booking #${booking.bookingId} Cancelled`,
+      message: `Booking #${booking.bookingId} was cancelled.`,
+    }).catch(() => {});
+  } else {
+    createBookingNotification({
+      booking,
+      type: 'status_updated',
+      title: `Booking #${booking.bookingId} Updated`,
+      message: `Booking status updated to ${booking.status}.`,
+    }).catch(() => {});
+  }
+
   res.json({ success: true, message: 'Booking status updated successfully', data: booking });
 });
 
@@ -869,7 +894,7 @@ exports.getAdminAddOns = catchAsync(async (req, res) => {
   if (category) query.category = category;
   if (search) query.name = { $regex: search, $options: 'i' };
 
-  const addOns = await AddOn.find(query).sort({ name: 1 });
+  const addOns = await AddOn.find(query).sort({ displayOrder: 1, sortOrder: 1, createdAt: 1, name: 1 });
   res.json({ success: true, data: addOns });
 });
 

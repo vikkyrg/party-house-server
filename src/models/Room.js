@@ -43,6 +43,7 @@ const RoomSchema = new mongoose.Schema(
     location: { type: String, trim: true },
     googleMapLink: String,
     slots: [slotSchema],
+    displayOrder: { type: Number, default: 0, index: true },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
