@@ -135,6 +135,50 @@ const formatDateToYMD = (dateInput) => {
   return '';
 };
 
+/**
+ * Get current date string (YYYY-MM-DD) in Asia/Kolkata timezone
+ */
+const getKolkataDateString = (dateObj = new Date()) => {
+  return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+};
+
+/**
+ * Get current time in minutes from midnight (0-1439) in Asia/Kolkata timezone
+ */
+const getKolkataCurrentMinutes = (dateObj = new Date()) => {
+  const timeStr = dateObj.toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const [h, m] = timeStr.split(':').map((v) => parseInt(v, 10));
+  return (h % 24) * 60 + m;
+};
+
+/**
+ * Check if a slot start time has already passed for a given date in Asia/Kolkata timezone.
+ * Returns true if date is in the past, or if date is today and slot start time <= current time.
+ */
+const isSlotInPast = (bookingDateStr, slotStartTimeStr, now = new Date()) => {
+  if (!bookingDateStr || !slotStartTimeStr) return false;
+  const targetDate = formatDateToYMD(bookingDateStr);
+  const currentDate = getKolkataDateString(now);
+
+  if (targetDate < currentDate) {
+    return true; // Past date
+  }
+
+  if (targetDate === currentDate) {
+    const slotStartMin = parseTimeToMinutes(slotStartTimeStr);
+    if (slotStartMin === -1) return false;
+    const currentMin = getKolkataCurrentMinutes(now);
+    return slotStartMin <= currentMin; // Slot has already started or passed
+  }
+
+  return false; // Future date
+};
+
 module.exports = {
   BOOKING_HOLD_DURATION_MINUTES,
   BOOKING_HOLD_DURATION_MS,
@@ -144,4 +188,7 @@ module.exports = {
   normalizeBookingDate,
   formatDateToYMD,
   getActiveBookingsFilter,
+  getKolkataDateString,
+  getKolkataCurrentMinutes,
+  isSlotInPast,
 };

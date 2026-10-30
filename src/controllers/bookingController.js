@@ -25,6 +25,9 @@ const {
   formatDateToYMD,
   getActiveBookingsFilter,
   BOOKING_HOLD_DURATION_MS,
+  getKolkataDateString,
+  getKolkataCurrentMinutes,
+  isSlotInPast,
 } = require('../utils/dateUtils');
 
 exports.createBooking = catchAsync(async (req, res, next) => {
@@ -65,9 +68,17 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   }
 
   const normalizedBookingDate = normalizeBookingDate(bookingDate || date);
-  const today = normalizeBookingDate(new Date());
-  if (!normalizedBookingDate || normalizedBookingDate < today) {
-    return next(new AppError('Booking date must be today or a future date.', 400));
+  const bookingDateStr = formatDateToYMD(bookingDate || date);
+  const kolkataTodayStr = getKolkataDateString();
+
+  if (!normalizedBookingDate || bookingDateStr < kolkataTodayStr) {
+    return next(new AppError('Booking date must be today or a future date. Past dates are not available for booking.', 400));
+  }
+
+  // Validate that the slot has not already started (Asia/Kolkata timezone)
+  const slotStartTime = (timeSlot || '').split('-')[0]?.trim();
+  if (isSlotInPast(bookingDateStr, slotStartTime)) {
+    return next(new AppError('This time slot has already started or passed and cannot be booked.', 400));
   }
 
   const configuredSlots = (room.slots || []).filter((slot) => slot.isActive !== false).map(
@@ -450,6 +461,10 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
   const bookingDate = normalizeBookingDate(date);
   if (!bookingDate) return next(new AppError('A valid date is required (YYYY-MM-DD)', 400));
 
+  const bookingDateStr = formatDateToYMD(date);
+  const kolkataTodayStr = getKolkataDateString();
+  const isPastDate = bookingDateStr < kolkataTodayStr;
+
   const room = await Room.findById(roomId);
   const theater = room ? await Theater.findById(room.theater) : null;
   if (!room || !room.isActive || !theater || !theater.isActive) return next(new AppError('Room not found or inactive', 404));
@@ -468,7 +483,8 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
   const slots = configuredSlots.map((s) => {
     const slotStr = `${s.startTime} - ${s.endTime}`;
     const conflicting = bookedBookings.find((b) => doesOverlap(b.timeSlot, slotStr));
-    const available = !conflicting;
+    const isPast = isPastDate || isSlotInPast(bookingDateStr, s.startTime);
+    const available = !conflicting && !isPast;
 
     const interval = getSlotInterval(slotStr);
     const durationHours = interval ? Math.round((interval.end - interval.start) / 60) : 2;
@@ -477,7 +493,10 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
     let slotState = 'available';
     let isTemporarilyHeld = false;
 
-    if (!available && conflicting) {
+    if (isPast) {
+      reason = isPastDate ? 'Past date' : 'Time slot has passed';
+      slotState = 'past';
+    } else if (!available && conflicting) {
       if (conflicting.status === 'confirmed' || conflicting.payment?.status === 'paid') {
         reason = 'Sold Out';
         slotState = 'sold_out';
@@ -503,6 +522,7 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
       status: available ? 'available' : 'booked',
       slotState,
       isTemporarilyHeld,
+      isPast,
       reason,
     };
   });
@@ -515,7 +535,8 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
     data: {
       room: room.name,
       roomId: room._id,
-      date: formatDateToYMD(date),
+      date: bookingDateStr,
+      isPastDate,
       slots,
       availableSlots: availableSlots.map((s) => s.time),
       bookedSlots: bookedSlots.map((s) => s.time),
