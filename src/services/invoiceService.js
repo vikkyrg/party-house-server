@@ -291,19 +291,19 @@ class InvoiceService {
     doc.text(this.formatCurrency(actualTotal), rightColX, currentY + 2, { align: 'right', width: rightColWidth });
     currentY += 22;
 
-    // Advance Payment Received & Remaining Balance Due
+    // Payment Received & Remaining Balance Due
     const isPaid = booking.payment?.status === 'paid';
-    const advancePaid = isPaid ? (booking.payment.amountPaid || pricing.advanceAmount || 750) : 0;
-    const remainingBalance = actualTotal > advancePaid ? actualTotal - advancePaid : 0;
+    const amountPaid = isPaid ? (booking.payment.amountPaid || pricing.advanceAmount || actualTotal) : 0;
+    const remainingBalance = actualTotal > amountPaid ? actualTotal - amountPaid : 0;
 
     doc.rect(leftX, currentY - 2, tableWidth, 38).fillAndStroke('#fcfbf9', '#e5e7eb');
 
     doc.font('AppFont-Bold').fontSize(8.5).fillColor('#065f46');
-    doc.text('Advance Amount Received:', leftX + 10, currentY + 4);
-    doc.text(this.formatCurrency(advancePaid), rightColX, currentY + 4, { align: 'right', width: rightColWidth });
+    doc.text('Total Paid:', leftX + 10, currentY + 4);
+    doc.text(this.formatCurrency(amountPaid), rightColX, currentY + 4, { align: 'right', width: rightColWidth });
 
     doc.font('AppFont-Bold').fontSize(9).fillColor('#92400e');
-    doc.text('Remaining Balance Due at Venue:', leftX + 10, currentY + 20);
+    doc.text('Balance Due:', leftX + 10, currentY + 20);
     doc.text(this.formatCurrency(remainingBalance), rightColX, currentY + 20, { align: 'right', width: rightColWidth });
 
     currentY += 46;

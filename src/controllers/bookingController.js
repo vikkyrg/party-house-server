@@ -262,8 +262,8 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   if (discountCode) discount = subtotal * 0.1;
 
   const total = subtotal + tax - discount;
-  const advanceAmount = 750;
-  const balanceAmount = total > advanceAmount ? total - advanceAmount : 0;
+  const advanceAmount = total; // Full payment required
+  const balanceAmount = 0;
   const holdDuration = BOOKING_HOLD_DURATION_MS || 10 * 60 * 1000;
   const holdExpiresAt = new Date(Date.now() + holdDuration); // Exactly 10-minute hold window
   const expiresAt = holdExpiresAt;
@@ -808,8 +808,8 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
     let discount = 0;
     if (discountCode) discount = subtotal * 0.1;
     const total = subtotal + tax - discount;
-    const advanceAmount = 750;
-    const balanceAmount = total > advanceAmount ? total - advanceAmount : 0;
+    const advanceAmount = total; // Full payment required
+    const balanceAmount = 0;
 
     combinedTotal += total;
     combinedAdvance += advanceAmount;

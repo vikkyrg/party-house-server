@@ -552,7 +552,8 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
     }
 
     booking.payment.status = 'paid';
-    booking.payment.amountPaid = booking.pricing?.advanceAmount || 750;
+    booking.payment.amountPaid = booking.pricing?.advanceAmount || booking.pricing?.total || 750;
+    booking.pricing.balanceAmount = 0;
     booking.payment.paidAt = new Date();
     booking.payment.verifiedAt = new Date();
     booking.payment.verifiedBy = req.user._id;
@@ -582,7 +583,8 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
     }
     if (req.body.paymentStatus === 'paid' && booking.payment.status !== 'paid') {
       booking.payment.status = 'paid';
-      booking.payment.amountPaid = booking.pricing?.advanceAmount || 750;
+      booking.payment.amountPaid = booking.pricing?.advanceAmount || booking.pricing?.total || 750;
+      booking.pricing.balanceAmount = 0;
       booking.payment.paidAt = new Date();
       booking.payment.verifiedAt = new Date();
       booking.payment.verifiedBy = req.user._id;
@@ -610,7 +612,8 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
   if (req.body.paymentStatus && !['confirmed'].includes(status) && req.body.action !== 'reject') {
     booking.payment.status = req.body.paymentStatus;
     if (req.body.paymentStatus === 'paid') {
-      booking.payment.amountPaid = booking.payment.amountPaid || booking.pricing?.advanceAmount || 750;
+      booking.payment.amountPaid = booking.payment.amountPaid || booking.pricing?.advanceAmount || booking.pricing?.total || 750;
+      if (booking.pricing) booking.pricing.balanceAmount = 0;
       booking.payment.paidAt = booking.payment.paidAt || new Date();
       booking.payment.verifiedAt = booking.payment.verifiedAt || new Date();
       booking.payment.verifiedBy = req.user._id;
