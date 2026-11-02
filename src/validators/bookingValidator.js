@@ -19,6 +19,7 @@ exports.createBookingSchema = Joi.object({
   cake: Joi.object({
     cakeId: Joi.string().hex().length(24).required(),
     size: Joi.string().required(),
+    isEggless: Joi.boolean().default(false).optional(),
   }).allow(null),
   customerDetails: Joi.object({
     name: Joi.string().trim().min(2).required().messages({
@@ -85,6 +86,7 @@ exports.bulkBookingSchema = Joi.object({
         cake: Joi.object({
           cakeId: Joi.string().hex().length(24).required(),
           size: Joi.string().required(),
+          isEggless: Joi.boolean().default(false).optional(),
         }).allow(null),
         addOns: Joi.array().items(
           Joi.object({

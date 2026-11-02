@@ -52,6 +52,7 @@ const BookingSchema = new mongoose.Schema(
       size: String,
       sizeLabel: String,
       flavor: String,
+      isEggless: { type: Boolean, default: false },
       price: { type: Number, default: 0 }
     },
     addOns: [

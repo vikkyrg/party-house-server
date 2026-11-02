@@ -204,6 +204,8 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       name: selectedCake.document.name,
       size: selectedCake.size.name,
       sizeLabel: selectedCake.size.label,
+      flavor: selectedCake.document.flavor,
+      isEggless: Boolean(req.body.cake?.isEggless),
       price: cakePrice
     };
   }
@@ -755,8 +757,9 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
             cakeId: selectedCake._id,
             name: selectedCake.name,
             size: selectedSize.name,
-            sizeLabel: selectedSize.name,
+            sizeLabel: selectedSize.label || selectedSize.name,
             flavor: selectedCake.flavor,
+            isEggless: Boolean(cake.isEggless),
             price: cakePrice,
           };
         }

@@ -253,9 +253,11 @@ class InvoiceService {
 
     // 2. Selected Cake (if any)
     if (booking.cake || booking.cakeDetails || pricing.cakePrice > 0) {
-      const cakeName = booking.cakeDetails?.name || booking.cake?.name || 'Celebration Cake';
-      const cakeSize = booking.cakeDetails?.sizeLabel || booking.cakeDetails?.size || '';
-      drawRow(`Cake: ${cakeName}${cakeSize ? ` (${cakeSize})` : ''}`, this.formatCurrency(pricing.cakePrice || 0));
+      const rawName = booking.cakeDetails?.name || booking.cake?.name || 'Celebration Cake';
+      const isEggless = Boolean(booking.cakeDetails?.isEggless || booking.cake?.isEggless);
+      const cakeDisplayName = isEggless ? `${rawName} (Eggless)` : rawName;
+      const cakeSize = booking.cakeDetails?.sizeLabel || booking.cakeDetails?.size || booking.cake?.sizeLabel || booking.cake?.size || '';
+      drawRow(`Cake: ${cakeDisplayName}${cakeSize ? ` (${cakeSize})` : ''}`, this.formatCurrency(pricing.cakePrice || 0));
     }
 
     // 3. Add-ons breakdown
