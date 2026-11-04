@@ -10,7 +10,7 @@ Production-ready backend API for CS Cinemas private theater booking platform.
 - Booking lifecycle with availability checks and Razorpay payments
 - Reviews, banners, testimonials, and FAQ content management
 - Admin dashboard, revenue reports, audit logs, and CSV export
-- Security middleware (Helmet, CORS, rate limiting, XSS, NoSQL injection protection)
+- Security middleware (Helmet, rate limiting, XSS, NoSQL injection protection)
 - Email notifications (Nodemailer) and SMS (Twilio)
 - Cloudinary file uploads
 - Winston + Morgan logging
