@@ -16,6 +16,7 @@ const { sendEmail } = require('../services/emailService');
 const { sendSMS } = require('../services/smsService');
 const appConfig = require('../config/app');
 const { GST_RATE } = require('../utils/constants');
+const { getPaymentSummary } = require('../services/bookingPaymentService');
 const settingService = require('../services/settingService');
 
 const {
@@ -380,7 +381,14 @@ exports.getUserBookings = catchAsync(async (req, res) => {
     .populate('eventType', 'name')
     .populate('addOns.addOn', 'name price category');
 
-  res.json({ success: true, count: bookings.length, data: bookings });
+  res.json({
+    success: true,
+    count: bookings.length,
+    data: bookings.map((booking) => ({
+      ...booking.toObject(),
+      paymentSummary: getPaymentSummary(booking),
+    })),
+  });
 });
 
 exports.getMyBookings = catchAsync(async (req, res) => {
@@ -389,7 +397,14 @@ exports.getMyBookings = catchAsync(async (req, res) => {
     .populate('theater', 'name images')
     .populate('eventType', 'name');
 
-  res.json({ success: true, count: bookings.length, data: bookings });
+  res.json({
+    success: true,
+    count: bookings.length,
+    data: bookings.map((booking) => ({
+      ...booking.toObject(),
+      paymentSummary: getPaymentSummary(booking),
+    })),
+  });
 });
 
 exports.getBooking = catchAsync(async (req, res, next) => {
@@ -408,7 +423,13 @@ exports.getBooking = catchAsync(async (req, res, next) => {
     return next(new AppError('Not authorized to view this booking', 403));
   }
 
-  res.json({ success: true, data: booking });
+  res.json({
+    success: true,
+    data: {
+      ...booking.toObject(),
+      paymentSummary: getPaymentSummary(booking),
+    },
+  });
 });
 
 exports.cancelBooking = catchAsync(async (req, res, next) => {

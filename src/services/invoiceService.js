@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
 const appConfig = require('../config/app');
+const { getPaymentSummary } = require('./bookingPaymentService');
 
 class InvoiceService {
   constructor() {
@@ -292,9 +293,9 @@ class InvoiceService {
     currentY += 22;
 
     // Payment Received & Remaining Balance Due
-    const isPaid = booking.payment?.status === 'paid';
-    const amountPaid = isPaid ? (booking.payment.amountPaid || pricing.advanceAmount || actualTotal) : 0;
-    const remainingBalance = actualTotal > amountPaid ? actualTotal - amountPaid : 0;
+    const paymentSummary = getPaymentSummary(booking);
+    const amountPaid = paymentSummary.verifiedAmountPaid;
+    const remainingBalance = paymentSummary.remainingBalance;
 
     doc.rect(leftX, currentY - 2, tableWidth, 38).fillAndStroke('#fcfbf9', '#e5e7eb');
 
@@ -311,7 +312,7 @@ class InvoiceService {
     // Payment & UPI Transaction Reference Box
     doc.roundedRect(leftX, currentY, tableWidth, 26, 4).fillAndStroke('#ffffff', '#e5e7eb');
     doc.font('AppFont-Bold').fontSize(8).fillColor('#374151');
-    const paymentStatusText = (booking.payment?.status || 'pending').toUpperCase();
+    const paymentStatusText = paymentSummary.paymentStatus.toUpperCase();
     const upiRefText = booking.payment?.upiTransactionId ? ` | UPI Ref / UTR: ${booking.payment.upiTransactionId}` : '';
     doc.text(`Payment Status: ${paymentStatusText}${upiRefText}`, leftX + 10, currentY + 8);
 

@@ -346,6 +346,20 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     expect(verifiedFirst.body.data.status).toBe(
       firstAmount >= advanceRequired ? 'confirmed' : 'pending_verification'
     );
+    const refreshedAdminDetail = await request(app)
+      .get(`/api/v1/admin/bookings/${bookingId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(refreshedAdminDetail.body.data.paymentSummary.verifiedAmountPaid).toBe(firstAmount);
+    expect(refreshedAdminDetail.body.data.paymentSummary.remainingBalance).toBe(total - firstAmount);
+    const refreshedCustomerDetail = await request(app)
+      .get(`/api/v1/bookings/${bookingId}`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .expect(200);
+    expect(refreshedCustomerDetail.body.data.paymentSummary.remainingBalance).toBe(total - firstAmount);
+    const persistedVerifiedBooking = await Booking.findById(bookingId);
+    expect(persistedVerifiedBooking.payment.amountPaid).toBe(firstAmount);
+    expect(persistedVerifiedBooking.pricing.balanceAmount).toBe(total - firstAmount);
     await verify(firstRecordId).expect(409);
 
     const bookingAfterSecond = await Booking.findById(bookingId);
@@ -375,6 +389,9 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     expect(rejectedPartial.body.data.paymentSummary.verifiedAmountPaid).toBe(firstAmount + secondAmount);
     expect(rejectedPartial.body.data.paymentSummary.remainingBalance).toBe(total - firstAmount - secondAmount);
     expect(rejectedPartial.body.data.paymentSummary.paymentStatus).toBe('payment_rejected');
+    const persistedRejectedBooking = await Booking.findById(bookingId);
+    expect(persistedRejectedBooking.payment.amountPaid).toBe(firstAmount + secondAmount);
+    expect(persistedRejectedBooking.pricing.balanceAmount).toBe(total - firstAmount - secondAmount);
 
     const finalPayment = await submit(finalAmount, 'UTR-PARTIAL-0003').expect(200);
     const finalRecord = finalPayment.body.data.paymentRecords.find(

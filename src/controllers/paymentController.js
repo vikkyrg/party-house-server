@@ -247,6 +247,7 @@ exports.checkPaymentStatus = catchAsync(async (req, res, next) => {
       .lean();
   }
 
+  const paymentSummary = getPaymentSummary(booking);
   res.json({
     success: true,
     data: {
@@ -256,16 +257,16 @@ exports.checkPaymentStatus = catchAsync(async (req, res, next) => {
       bulkBookingId: booking.bulkBookingId || null,
       bulkEntries,
       status: isExpired ? 'cancelled' : booking.status,
-      paymentStatus: booking.payment?.status,
+      paymentStatus: paymentSummary.paymentStatus,
       upiTransactionId: booking.payment?.upiTransactionId,
-      amountPaid: booking.payment?.amountPaid || 0,
+      amountPaid: paymentSummary.verifiedAmountPaid,
       paidAt: booking.payment?.paidAt,
       rejectedReason: booking.payment?.rejectedReason,
       expiresAt: effectiveExpiry,
       holdExpiresAt: effectiveExpiry,
       isExpired,
       paymentRecords: booking.paymentRecords,
-      paymentSummary: getPaymentSummary(booking),
+      paymentSummary,
     },
   });
 });
@@ -287,6 +288,7 @@ exports.getInvoice = catchAsync(async (req, res, next) => {
     return next(new AppError('Not authorized', 403));
   }
 
+  const paymentSummary = getPaymentSummary(booking);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename=invoice-${booking.bookingId}.pdf`);
 
@@ -305,9 +307,9 @@ exports.getInvoice = catchAsync(async (req, res, next) => {
   doc.moveDown();
   doc.text(`Total Booking Value: ₹${booking.pricing?.total || 0}`);
   doc.text(`Advance Required: ₹${booking.pricing?.advanceAmount || 750}`);
-  doc.text(`Advance Paid: ₹${booking.payment?.amountPaid || 0}`);
-  doc.text(`Balance Due at Venue: ₹${Math.max(0, (booking.pricing?.total || 0) - (booking.payment?.amountPaid || 0))}`);
-  doc.text(`Payment Status: ${(booking.payment?.status || 'pending').toUpperCase()}`);
+  doc.text(`Advance Paid: ₹${paymentSummary.verifiedAmountPaid}`);
+  doc.text(`Balance Due at Venue: ₹${paymentSummary.remainingBalance}`);
+  doc.text(`Payment Status: ${paymentSummary.paymentStatus.toUpperCase()}`);
   if (booking.payment?.upiTransactionId) {
     doc.text(`UPI Reference: ${booking.payment.upiTransactionId}`);
   }
