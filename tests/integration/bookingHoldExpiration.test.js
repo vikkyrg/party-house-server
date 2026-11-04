@@ -10,6 +10,7 @@ const { connectDB, disconnectDB, clearDB } = require('../fixtures/db');
 const { cleanupExpiredBookings } = require('../../src/services/bookingExpiryService');
 const { normalizeBookingDate, getActiveBookingsFilter } = require('../../src/utils/dateUtils');
 const tokenService = require('../../src/services/tokenService');
+const futureBookingDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', () => {
   let customerUser;
@@ -106,8 +107,8 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
   });
 
   const validBookingPayload = {
-    date: '2026-10-23',
-    bookingDate: '2026-10-23',
+    date: futureBookingDate,
+    bookingDate: futureBookingDate,
     timeSlot: '10:30 AM - 11:30 AM',
     duration: 1,
     customerDetails: {
@@ -161,7 +162,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
       .get('/api/v1/bookings/check-availability')
       .query({
         roomId: room._id.toString(),
-        date: '2026-10-23',
+        date: futureBookingDate,
       })
       .expect(200);
 
@@ -209,6 +210,38 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     expect(res.body.message).toMatch(/booked|slot/i);
   });
 
+  it('allows only one customer to win concurrent hold creation for the same slot', async () => {
+    const createForCustomer = (token, customerDetails) =>
+      request(app)
+        .post('/api/v1/bookings')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          ...validBookingPayload,
+          theaterId: theater._id,
+          roomId: room._id,
+          eventTypeId: eventType._id,
+          customerDetails,
+        });
+
+    const responses = await Promise.all([
+      createForCustomer(customerToken, validBookingPayload.customerDetails),
+      createForCustomer(customer2Token, {
+        name: 'Customer B',
+        email: 'customerb@example.com',
+        phone: '9876543211',
+        members: 2,
+      }),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(await Booking.countDocuments({
+      room: room._id,
+      date: normalizeBookingDate(futureBookingDate),
+      timeSlot: validBookingPayload.timeSlot,
+      status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+    })).toBe(1);
+  });
+
   it('4. Customer A successfully submits payment details and booking confirms after verification', async () => {
     const createRes = await request(app)
       .post('/api/v1/bookings')
@@ -229,31 +262,34 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
       .set('Authorization', `Bearer ${customerToken}`)
       .send({
         bookingId,
+        paymentAmount: createRes.body.data.pricing.total,
         upiTransactionId: '123456789012',
       })
       .expect(200);
 
     expect(upiRes.body.data.status).toBe('pending_verification');
-    expect(upiRes.body.data.paymentStatus).toBe('submitted');
+    expect(upiRes.body.data.paymentStatus).toBe('pending_verification');
 
     // Admin verifies advance payment
     const adminVerifyRes = await request(app)
       .put(`/api/v1/admin/bookings/${bookingId}/status`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        action: 'verify',
+        action: 'verifyPayment',
+        paymentRecordId: upiRes.body.data.paymentRecords[0]._id,
       })
       .expect(200);
 
     expect(adminVerifyRes.body.data.status).toBe('confirmed');
-    expect(adminVerifyRes.body.data.payment.status).toBe('paid');
+    expect(adminVerifyRes.body.data.payment.status).toBe('fully_paid');
+    expect(adminVerifyRes.body.data.paymentSummary.verifiedAmountPaid).toBe(createRes.body.data.pricing.total);
 
     // Check availability now shows Sold Out
     const availRes = await request(app)
       .get('/api/v1/bookings/check-availability')
       .query({
         roomId: room._id.toString(),
-        date: '2026-10-23',
+        date: futureBookingDate,
       })
       .expect(200);
 
@@ -261,6 +297,206 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     expect(soldOutSlot.available).toBe(false);
     expect(soldOutSlot.slotState).toBe('sold_out');
     expect(soldOutSlot.reason).toBe('Sold Out');
+  });
+
+  it('accepts multiple partial payments, verifies each once, and blocks overpayment after full payment', async () => {
+    const createRes = await request(app)
+      .post('/api/v1/bookings')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        ...validBookingPayload,
+        theaterId: theater._id,
+        roomId: room._id,
+        eventTypeId: eventType._id,
+      })
+      .expect(201);
+    const bookingId = createRes.body.data._id;
+    const total = createRes.body.data.pricing.total;
+    const firstAmount = Math.min(250, total - 2);
+    const secondAmount = firstAmount;
+    const finalAmount = total - firstAmount - secondAmount;
+
+    const submit = (paymentAmount, transactionReference) =>
+      request(app)
+        .post('/api/v1/payment/submit-upi')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send({ bookingId, paymentAmount, transactionReference });
+    const verify = (paymentRecordId) =>
+      request(app)
+        .put(`/api/v1/admin/bookings/${bookingId}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ action: 'verifyPayment', paymentRecordId });
+
+    const first = await submit(firstAmount, 'UTR-PARTIAL-0001').expect(200);
+    expect(first.body.data.paymentSummary.verifiedAmountPaid).toBe(0);
+    expect(first.body.data.paymentSummary.pendingVerificationAmount).toBe(firstAmount);
+    expect(first.body.data.paymentSummary.remainingBalance).toBe(total);
+    await submit(firstAmount, 'UTR-PARTIAL-0001').expect(409);
+
+    await submit(total + 1, 'UTR-OVERPAY-0001').expect(400);
+    await submit(secondAmount, 'UTR-PARTIAL-0002').expect(200);
+
+    const firstRecordId = first.body.data.paymentRecords[0]._id;
+    const verifiedFirst = await verify(firstRecordId).expect(200);
+    expect(verifiedFirst.body.data.paymentSummary.verifiedAmountPaid).toBe(firstAmount);
+    expect(verifiedFirst.body.data.paymentSummary.remainingBalance).toBe(total - firstAmount);
+    await verify(firstRecordId).expect(409);
+
+    const bookingAfterSecond = await Booking.findById(bookingId);
+    const secondRecord = bookingAfterSecond.paymentRecords.find(
+      (record) => record.transactionReference === 'UTR-PARTIAL-0002'
+    );
+    const verifiedSecond = await verify(secondRecord._id).expect(200);
+    expect(verifiedSecond.body.data.paymentSummary.verifiedAmountPaid).toBe(firstAmount + secondAmount);
+    expect(verifiedSecond.body.data.paymentSummary.paymentStatus).toBe('partially_paid');
+
+    const rejectedSubmission = await submit(1, 'UTR-PARTIAL-REJECT-0001').expect(200);
+    const rejectedRecord = rejectedSubmission.body.data.paymentRecords.find(
+      (record) => record.transactionReference === 'UTR-PARTIAL-REJECT-0001'
+    );
+    const rejectedPartial = await request(app)
+      .put(`/api/v1/admin/bookings/${bookingId}/status`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        action: 'rejectPayment',
+        paymentRecordId: rejectedRecord._id,
+        rejectionReason: 'Reference not found in bank statement',
+      })
+      .expect(200);
+    expect(rejectedPartial.body.data.paymentSummary.verifiedAmountPaid).toBe(firstAmount + secondAmount);
+    expect(rejectedPartial.body.data.paymentSummary.remainingBalance).toBe(total - firstAmount - secondAmount);
+    expect(rejectedPartial.body.data.paymentSummary.paymentStatus).toBe('payment_rejected');
+
+    const finalPayment = await submit(finalAmount, 'UTR-PARTIAL-0003').expect(200);
+    const finalRecord = finalPayment.body.data.paymentRecords.find(
+      (record) => record.transactionReference === 'UTR-PARTIAL-0003'
+    );
+    const fullyPaid = await verify(finalRecord._id).expect(200);
+    expect(fullyPaid.body.data.paymentSummary.paymentStatus).toBe('fully_paid');
+    expect(fullyPaid.body.data.paymentSummary.remainingBalance).toBe(0);
+    await submit(1, 'UTR-AFTER-FULL-0001').expect(409);
+  });
+
+  it('does not reduce the balance when an individual payment is rejected', async () => {
+    const createRes = await request(app)
+      .post('/api/v1/bookings')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        ...validBookingPayload,
+        theaterId: theater._id,
+        roomId: room._id,
+        eventTypeId: eventType._id,
+      })
+      .expect(201);
+    const bookingId = createRes.body.data._id;
+    const total = createRes.body.data.pricing.total;
+    const amount = Math.min(200, total);
+
+    const submitted = await request(app)
+      .post('/api/v1/payment/submit-upi')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ bookingId, paymentAmount: amount, transactionReference: 'UTR-REJECT-0001' })
+      .expect(200);
+    const record = submitted.body.data.paymentRecords[0];
+
+    const rejected = await request(app)
+      .put(`/api/v1/admin/bookings/${bookingId}/status`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        action: 'rejectPayment',
+        paymentRecordId: record._id,
+        rejectionReason: 'Reference not found in bank statement',
+      })
+      .expect(200);
+
+    expect(rejected.body.data.paymentSummary.verifiedAmountPaid).toBe(0);
+    expect(rejected.body.data.paymentSummary.pendingVerificationAmount).toBe(0);
+    expect(rejected.body.data.paymentSummary.remainingBalance).toBe(total);
+    expect(rejected.body.data.paymentSummary.paymentStatus).toBe('payment_rejected');
+  });
+
+  it('prevents concurrent verification from exceeding the booking total', async () => {
+    const createRes = await request(app)
+      .post('/api/v1/bookings')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        ...validBookingPayload,
+        theaterId: theater._id,
+        roomId: room._id,
+        eventTypeId: eventType._id,
+      })
+      .expect(201);
+    const bookingId = createRes.body.data._id;
+    const total = createRes.body.data.pricing.total;
+    const submissions = await Promise.all(
+      ['UTR-CONCURRENT-0001', 'UTR-CONCURRENT-0002'].map((transactionReference) =>
+        request(app)
+          .post('/api/v1/payment/submit-upi')
+          .set('Authorization', `Bearer ${customerToken}`)
+          .send({ bookingId, paymentAmount: total, transactionReference })
+      )
+    );
+    submissions.forEach((response) => expect(response.status).toBe(200));
+    const [bookingBeforeVerification] = await Promise.all([Booking.findById(bookingId)]);
+    const verificationResults = await Promise.all(
+      bookingBeforeVerification.paymentRecords.map((record) =>
+        request(app)
+          .put(`/api/v1/admin/bookings/${bookingId}/status`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ action: 'verifyPayment', paymentRecordId: record._id.toString() })
+      )
+    );
+
+    expect(verificationResults.map((response) => response.status).sort()).toEqual([200, 409]);
+    const finalBooking = await Booking.findById(bookingId);
+    expect(finalBooking.payment.amountPaid).toBe(total);
+    expect(finalBooking.paymentRecords.filter((record) => record.paymentStatus === 'verified')).toHaveLength(1);
+  });
+
+  it('preserves the original 10-minute expiry after payment submission and releases an expired hold', async () => {
+    const createRes = await request(app)
+      .post('/api/v1/bookings')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        ...validBookingPayload,
+        theaterId: theater._id,
+        roomId: room._id,
+        eventTypeId: eventType._id,
+      })
+      .expect(201);
+
+    const bookingId = createRes.body.data._id;
+    const originalExpiry = new Date(createRes.body.data.holdExpiresAt);
+
+    await request(app)
+      .post('/api/v1/payment/submit-upi')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ bookingId, paymentAmount: 1, upiTransactionId: '123456789012' })
+      .expect(200);
+
+    let booking = await Booking.findById(bookingId);
+    expect(booking.holdExpiresAt.getTime()).toBe(originalExpiry.getTime());
+
+    const pastDate = new Date(Date.now() - 60 * 1000);
+    await Booking.findByIdAndUpdate(bookingId, {
+      holdExpiresAt: pastDate,
+      expiresAt: pastDate,
+    });
+
+    const statusRes = await request(app)
+      .get(`/api/v1/payment/status/${bookingId}`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .expect(200);
+
+    expect(statusRes.body.data.isExpired).toBe(true);
+    booking = await Booking.findById(bookingId);
+    expect(booking.status).toBe('cancelled');
+
+    await request(app)
+      .post('/api/v1/payment/submit-upi')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ bookingId, paymentAmount: 1, upiTransactionId: '123456789012' })
+      .expect(409);
   });
 
   it('5. An unpaid booking expires after 10 minutes and cleanup job releases the slot', async () => {
@@ -289,7 +525,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
       .get('/api/v1/bookings/check-availability')
       .query({
         roomId: room._id.toString(),
-        date: '2026-10-23',
+        date: futureBookingDate,
       })
       .expect(200);
 
@@ -343,7 +579,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
       user: customer2User._id,
       theater: theater._id,
       room: room._id,
-      date: normalizeBookingDate('2026-10-24'),
+      date: normalizeBookingDate(futureBookingDate),
       duration: 1,
       timeSlot: '12:30 PM - 02:30 PM',
       eventType: eventType._id,
@@ -401,6 +637,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
       .set('Authorization', `Bearer ${customerToken}`)
       .send({
         bookingId,
+        paymentAmount: 1,
         upiTransactionId: '123456789012',
       })
       .expect(409);
@@ -414,7 +651,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
       user: customerUser._id,
       theater: theater._id,
       room: room._id,
-      date: normalizeBookingDate('2026-10-23'),
+      date: normalizeBookingDate(futureBookingDate),
       duration: 1,
       timeSlot: '03:00 PM - 05:00 PM',
       eventType: eventType._id,

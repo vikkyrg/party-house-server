@@ -21,6 +21,7 @@ const siteContentRoutes = require('./siteContentRoutes');
 const galleryRoutes = require('./galleryRoutes');
 const serviceRoutes = require('./serviceRoutes');
 const storyRoutes = require('./storyRoutes');
+const settingRoutes = require('./settingRoutes');
 
 const contactRoutes = require('./contact');
 const newsletterRoutes = require('./newsletter');
@@ -49,6 +50,7 @@ router.use('/site-content', siteContentRoutes);
 router.use('/gallery', galleryRoutes);
 router.use('/services', serviceRoutes);
 router.use('/stories', storyRoutes);
+router.use('/settings', settingRoutes);
 router.use('/contact', contactRoutes);
 router.use('/newsletter', newsletterRoutes);
 

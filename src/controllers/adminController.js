@@ -20,10 +20,18 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const { sendEmail } = require('../services/emailService');
 const { createAuditLog } = require('../services/auditService');
+const {
+  getPaymentSummary,
+  verifiedAmountExpression,
+  countPaymentStatusExpression,
+  paymentRecordsSummaryUpdate,
+  roundMoney,
+} = require('../services/bookingPaymentService');
 
 const {
   doesOverlap,
   normalizeBookingDate,
+  getBookingHoldExpiry,
   getActiveBookingsFilter,
 } = require('../utils/dateUtils');
 
@@ -81,23 +89,19 @@ exports.getDashboardStats = catchAsync(async (req, res) => {
       status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
       $nor: [
         {
-          status: { $in: ['pending', 'pending_payment'] },
-          'payment.status': { $in: ['pending', 'failed'] },
+          status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+          'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
           holdExpiresAt: { $exists: true, $ne: null, $lt: new Date() },
         },
         {
-          status: { $in: ['pending', 'pending_payment'] },
-          'payment.status': { $in: ['pending', 'failed'] },
+          status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+          'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
           expiresAt: { $exists: true, $ne: null, $lt: new Date() },
         },
         {
-          status: { $in: ['pending', 'pending_payment'] },
-          'payment.status': { $in: ['pending', 'failed'] },
-          $and: [
-            { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
-            { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
-          ],
-          createdAt: { $lt: new Date(Date.now() - 10 * 60 * 1000) },
+          status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+          'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
+          createdAt: { $lte: new Date(Date.now() - 10 * 60 * 1000) },
         },
       ],
     }),
@@ -411,30 +415,25 @@ exports.getAllBookings = catchAsync(async (req, res) => {
     ];
   }
 
-  // Pending unpaid bookings should appear only while their 10-minute hold is active.
-  // Unless the admin specifically queries for 'cancelled' bookings, exclude expired unpaid holds from active listing.
+  // Unconfirmed bookings should appear in active listings only while their 10-minute hold is active.
   if (status !== 'cancelled') {
     const now = new Date();
     const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
     query.$nor = [
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
-        holdExpiresAt: { $exists: true, $ne: null, $lt: now },
+        status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+        'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
+        holdExpiresAt: { $exists: true, $ne: null, $lte: now },
       },
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
-        expiresAt: { $exists: true, $ne: null, $lt: now },
+        status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+        'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
+        expiresAt: { $exists: true, $ne: null, $lte: now },
       },
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
-        $and: [
-          { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
-          { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
-        ],
-        createdAt: { $lt: tenMinutesAgo },
+        status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+        'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
+        createdAt: { $lte: tenMinutesAgo },
       },
     ];
   }
@@ -451,11 +450,15 @@ exports.getAllBookings = catchAsync(async (req, res) => {
     .lean();
 
   const total = await Booking.countDocuments(query);
+  const bookingsWithPaymentSummary = bookings.map((booking) => ({
+    ...booking,
+    paymentSummary: getPaymentSummary(booking),
+  }));
 
   res.json({
     success: true,
     data: {
-      bookings,
+      bookings: bookingsWithPaymentSummary,
       pagination: {
         currentPage: parseInt(page, 10),
         totalPages: Math.ceil(total / safeLimit),
@@ -477,17 +480,179 @@ exports.getBookingDetail = catchAsync(async (req, res, next) => {
     .populate('confirmedBy', 'name email')
     .populate('cancelledBy', 'name email')
     .populate('payment.verifiedBy', 'name email')
+    .populate('paymentRecords.verifiedBy', 'name email')
+    .populate('paymentRecords.rejectedBy', 'name email')
     .populate('review');
 
   if (!booking) return next(new AppError('Booking not found', 404));
-  res.json({ success: true, data: booking });
+  res.json({
+    success: true,
+    data: {
+      ...booking.toObject(),
+      paymentSummary: getPaymentSummary(booking),
+    },
+  });
 });
+
+const updatePaymentRecord = async (booking, req, res, next) => {
+  const { action, paymentRecordId } = req.body;
+  if (!paymentRecordId || !/^[a-f\d]{24}$/i.test(paymentRecordId)) {
+    return next(new AppError('A valid payment record is required.', 400));
+  }
+
+  const record = booking.paymentRecords.id(paymentRecordId);
+  if (!record || record.paymentStatus !== 'pending_verification') {
+    return next(new AppError('This payment has already been processed or does not exist.', 409));
+  }
+
+  const now = new Date();
+  const isPendingBooking = ['pending', 'pending_payment', 'pending_verification'].includes(booking.status);
+  const holdExpiry = getBookingHoldExpiry(booking);
+  if (action === 'verifyPayment' && isPendingBooking && holdExpiry && holdExpiry <= now) {
+    return next(new AppError('The booking hold has expired; this payment cannot confirm the reservation.', 409));
+  }
+
+  const updateRecord = action === 'verifyPayment'
+    ? {
+        paymentStatus: 'verified',
+        verifiedAt: now,
+        verifiedBy: req.user._id,
+      }
+    : {
+        paymentStatus: 'rejected',
+        rejectedAt: now,
+        rejectedBy: req.user._id,
+        rejectionReason: req.body.rejectionReason.trim(),
+      };
+  const paymentRecordObjectId = record._id;
+  const paymentRecordsUpdate = {
+    $map: {
+      input: { $ifNull: ['$paymentRecords', []] },
+      as: 'record',
+      in: {
+        $cond: [
+          { $eq: ['$$record._id', paymentRecordObjectId] },
+          { $mergeObjects: ['$$record', updateRecord] },
+          '$$record',
+        ],
+      },
+    },
+  };
+  const verifiedAmount = verifiedAmountExpression();
+  const isVerification = action === 'verifyPayment';
+  const filter = {
+    _id: booking._id,
+    status: { $nin: ['cancelled'] },
+    paymentRecords: {
+      $elemMatch: {
+        _id: paymentRecordObjectId,
+        paymentStatus: 'pending_verification',
+      },
+    },
+  };
+
+  if (isVerification) {
+    filter.$expr = {
+      $lte: [
+        { $add: [verifiedAmount, record.paymentAmount] },
+        { $ifNull: ['$pricing.total', 0] },
+      ],
+    };
+  }
+
+  const updatedBooking = await Booking.findOneAndUpdate(
+    filter,
+    [
+      { $set: { paymentRecords: paymentRecordsUpdate } },
+      { $set: paymentRecordsSummaryUpdate() },
+      {
+        $set: {
+          status: isVerification
+            ? {
+                $cond: [
+                  { $in: ['$status', ['pending', 'pending_payment', 'pending_verification']] },
+                  'confirmed',
+                  '$status',
+                ],
+              }
+            : {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ['$status', 'pending_verification'] },
+                      { $eq: [countPaymentStatusExpression('pending_verification'), 0] },
+                    ],
+                  },
+                  'pending_payment',
+                  '$status',
+                ],
+              },
+        },
+      },
+      ...(isVerification
+        ? [{
+            $set: {
+              confirmedAt: { $ifNull: ['$confirmedAt', now] },
+              confirmedBy: { $ifNull: ['$confirmedBy', req.user._id] },
+            },
+          }]
+        : []),
+    ],
+    { new: true, runValidators: true }
+  );
+
+  if (!updatedBooking) {
+    return next(new AppError(
+      isVerification
+        ? 'This payment was already processed or would exceed the booking total.'
+        : 'This payment was already processed.',
+      409
+    ));
+  }
+
+  await createAuditLog({
+    user: req.user._id,
+    action: 'update',
+    model: 'Booking',
+    modelId: booking._id,
+    changes: {
+      after: {
+        operation: isVerification ? 'verify_payment' : 'reject_payment',
+        paymentRecordId,
+        paymentAmount: record.paymentAmount,
+        transactionReference: record.transactionReference,
+        paymentStatus: updateRecord.paymentStatus,
+      },
+    },
+    req,
+  });
+
+  return res.json({
+    success: true,
+    message: isVerification ? 'Payment verified successfully.' : 'Payment rejected.',
+    data: {
+      ...updatedBooking.toObject(),
+      paymentSummary: getPaymentSummary(updatedBooking),
+    },
+  });
+};
 
 exports.updateBookingStatus = catchAsync(async (req, res, next) => {
   let { status, notes } = req.body;
   const booking = await Booking.findById(req.params.id);
 
   if (!booking) return next(new AppError('Booking not found', 404));
+
+  if (req.body.action === 'verifyPayment' || req.body.action === 'rejectPayment') {
+    if (req.body.action === 'rejectPayment' && !req.body.rejectionReason?.trim()) {
+      return next(new AppError('A rejection reason is mandatory.', 400));
+    }
+    return updatePaymentRecord(booking, req, res, next);
+  }
+
+  if (req.body.action === 'verify' && booking.paymentRecords?.length) {
+    return next(new AppError('Verify a specific submitted payment record.', 400));
+  }
 
   // If action is reject, default status to cancelled
   if (req.body.action === 'reject') {
@@ -507,6 +672,20 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
         400
       )
     );
+  }
+
+  if (req.body.action === 'verify' || (status === 'confirmed' && req.body.paymentStatus === 'paid')) {
+    const holdExpiry = getBookingHoldExpiry(booking);
+    const isUnpaidHold = ['pending', 'pending_payment', 'pending_verification'].includes(booking.status) &&
+      ['pending', 'failed', 'submitted', 'pending_verification'].includes(booking.payment?.status);
+
+    if (isUnpaidHold && holdExpiry && holdExpiry <= new Date()) {
+      booking.status = 'cancelled';
+      booking.cancellationReason = 'Booking reservation expired due to uncompleted advance payment within 10-minute hold window.';
+      booking.cancelledAt = new Date();
+      await booking.save();
+      return next(new AppError('Cannot confirm this booking because its 10-minute hold has expired. The customer must reserve an available slot again.', 409));
+    }
   }
 
   const before = { status: booking.status };
@@ -529,34 +708,31 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
 
   // Handle explicit verification action
   if (req.body.action === 'verify' || (status === 'confirmed' && req.body.paymentStatus === 'paid')) {
-    // If booking hold had expired, ensure no other active reservation has taken the slot
-    const now = new Date();
-    const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
-    const wasExpired = ['pending', 'pending_payment'].includes(booking.status) &&
-      (['pending', 'failed'].includes(booking.payment?.status)) &&
-      ((booking.holdExpiresAt && booking.holdExpiresAt < now) ||
-       (booking.expiresAt && booking.expiresAt < now) ||
-       (!booking.holdExpiresAt && !booking.expiresAt && booking.createdAt < tenMinutesAgo));
-
-    if (wasExpired) {
-      const filter = getActiveBookingsFilter({
-        _id: { $ne: booking._id },
-        room: booking.room,
-        date: booking.date,
-      });
-      const activeBookings = await Booking.find(filter);
-      const isOverlap = activeBookings.some((b) => doesOverlap(b.timeSlot, booking.timeSlot));
-      if (isOverlap) {
-        return next(new AppError('Cannot confirm this booking: The hold has expired and this slot has already been reserved by another customer.', 409));
-      }
-    }
-
-    booking.payment.status = 'paid';
-    booking.payment.amountPaid = booking.pricing?.advanceAmount || booking.pricing?.total || 750;
-    booking.pricing.balanceAmount = 0;
-    booking.payment.paidAt = new Date();
+    const total = Number(booking.pricing?.total || 0);
+    const verifiedAmount = roundMoney(Math.min(
+      total,
+      Number(booking.payment?.amountPaid || booking.pricing?.advanceAmount || total)
+    ));
+    booking.payment.status = verifiedAmount >= total ? 'fully_paid' : 'partially_paid';
+    booking.payment.amountPaid = verifiedAmount;
+    booking.pricing.balanceAmount = roundMoney(Math.max(0, total - verifiedAmount));
+    if (verifiedAmount >= total) booking.payment.paidAt = new Date();
     booking.payment.verifiedAt = new Date();
     booking.payment.verifiedBy = req.user._id;
+    if (booking.payment.upiTransactionId && !booking.paymentRecords?.length) {
+      const normalizedReference = booking.payment.upiTransactionId.trim().toUpperCase();
+      booking.paymentRecords.push({
+        bookingId: booking._id,
+        paymentAmount: verifiedAmount,
+        transactionReference: booking.payment.upiTransactionId.trim(),
+        transactionReferenceNormalized: normalizedReference,
+        paymentMethod: 'upi',
+        paymentStatus: 'verified',
+        submittedAt: booking.payment.submittedAt || booking.createdAt,
+        verifiedAt: booking.payment.verifiedAt,
+        verifiedBy: req.user._id,
+      });
+    }
     booking.status = 'confirmed';
     booking.confirmedBy = req.user._id;
     booking.confirmedAt = new Date();
@@ -572,7 +748,7 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
     booking.cancellationReason = `Payment verification rejected: ${req.body.rejectionReason.trim()}`;
   } else if (status === 'confirmed') {
     // A booking must not become confirmed until its required advance payment has been verified
-    const isPaymentPaid = booking.payment?.status === 'paid' || req.body.paymentStatus === 'paid';
+    const isPaymentPaid = ['paid', 'fully_paid', 'partially_paid', 'partial'].includes(booking.payment?.status) || req.body.paymentStatus === 'paid';
     if (!isPaymentPaid) {
       return next(
         new AppError(
@@ -582,10 +758,14 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
       );
     }
     if (req.body.paymentStatus === 'paid' && booking.payment.status !== 'paid') {
-      booking.payment.status = 'paid';
-      booking.payment.amountPaid = booking.pricing?.advanceAmount || booking.pricing?.total || 750;
-      booking.pricing.balanceAmount = 0;
-      booking.payment.paidAt = new Date();
+      const total = Number(booking.pricing?.total || 0);
+      booking.payment.amountPaid = roundMoney(Math.min(
+        total,
+        Number(booking.payment.amountPaid || booking.pricing?.advanceAmount || total)
+      ));
+      booking.payment.status = booking.payment.amountPaid >= total ? 'fully_paid' : 'partially_paid';
+      booking.pricing.balanceAmount = roundMoney(Math.max(0, total - booking.payment.amountPaid));
+      if (booking.payment.amountPaid >= total) booking.payment.paidAt = new Date();
       booking.payment.verifiedAt = new Date();
       booking.payment.verifiedBy = req.user._id;
       if (req.body.paymentMethod) booking.payment.method = req.body.paymentMethod;
@@ -1089,23 +1269,19 @@ exports.exportBookings = catchAsync(async (req, res) => {
     const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
     query.$nor = [
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
-        holdExpiresAt: { $exists: true, $ne: null, $lt: now },
+        status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+        'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
+        holdExpiresAt: { $exists: true, $ne: null, $lte: now },
       },
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
-        expiresAt: { $exists: true, $ne: null, $lt: now },
+        status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+        'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
+        expiresAt: { $exists: true, $ne: null, $lte: now },
       },
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
-        $and: [
-          { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
-          { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
-        ],
-        createdAt: { $lt: tenMinutesAgo },
+        status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+        'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
+        createdAt: { $lte: tenMinutesAgo },
       },
     ];
   }

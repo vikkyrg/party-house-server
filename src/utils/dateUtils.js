@@ -80,41 +80,48 @@ const normalizeBookingDate = (dateInput) => {
 const BOOKING_HOLD_DURATION_MINUTES = 10;
 const BOOKING_HOLD_DURATION_MS = BOOKING_HOLD_DURATION_MINUTES * 60 * 1000;
 
+const getBookingHoldExpiry = (booking) => {
+  const rawExpiry = booking?.holdExpiresAt || booking?.expiresAt;
+  const expiry = rawExpiry ? new Date(rawExpiry).getTime() : Number.NaN;
+  const createdAt = booking?.createdAt ? new Date(booking.createdAt).getTime() : Number.NaN;
+  const createdExpiry = Number.isFinite(createdAt) ? createdAt + BOOKING_HOLD_DURATION_MS : Number.NaN;
+
+  if (Number.isFinite(expiry) && Number.isFinite(createdExpiry)) {
+    return new Date(Math.min(expiry, createdExpiry));
+  }
+  if (Number.isFinite(expiry)) return new Date(expiry);
+  if (Number.isFinite(createdExpiry)) return new Date(createdExpiry);
+  return null;
+};
+
 /**
- * Build MongoDB filter for active bookings that occupy a room/theater on a given date.
- * Excludes cancelled, no-show, failed, and expired unpaid reservations.
- * If a pending unpaid booking has holdExpiresAt or expiresAt, it expires when that timestamp passes.
- * If it lacks an expiration timestamp, it expires 10 minutes after createdAt.
+ * Build a MongoDB filter for bookings that still occupy a room on a given date.
+ * Unconfirmed bookings, including submitted payments, stop occupying the slot after 10 minutes.
  */
 const getActiveBookingsFilter = (baseFilter = {}) => {
   const now = new Date();
   const tenMinutesAgo = new Date(now.getTime() - BOOKING_HOLD_DURATION_MS);
+  const pendingHoldStatuses = ['pending', 'pending_payment', 'pending_verification'];
+  const unpaidPaymentStatuses = ['pending', 'failed', 'submitted', 'pending_verification'];
 
   return {
     ...baseFilter,
     status: { $in: ['pending', 'pending_payment', 'pending_verification', 'confirmed', 'in-progress', 'completed'] },
     $nor: [
-      // 1. Pending unpaid bookings with explicit holdExpiresAt that has expired
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
-        holdExpiresAt: { $exists: true, $ne: null, $lt: now },
+        status: { $in: pendingHoldStatuses },
+        'payment.status': { $in: unpaidPaymentStatuses },
+        holdExpiresAt: { $exists: true, $ne: null, $lte: now },
       },
-      // 2. Pending unpaid bookings with expiresAt that has expired
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
-        expiresAt: { $exists: true, $ne: null, $lt: now },
+        status: { $in: pendingHoldStatuses },
+        'payment.status': { $in: unpaidPaymentStatuses },
+        expiresAt: { $exists: true, $ne: null, $lte: now },
       },
-      // 3. Old pending unpaid bookings missing explicit expiry timestamps older than 10 minutes
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
-        $and: [
-          { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
-          { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
-        ],
-        createdAt: { $lt: tenMinutesAgo },
+        status: { $in: pendingHoldStatuses },
+        'payment.status': { $in: unpaidPaymentStatuses },
+        createdAt: { $lte: tenMinutesAgo },
       },
     ],
   };
@@ -187,6 +194,7 @@ module.exports = {
   doesOverlap,
   normalizeBookingDate,
   formatDateToYMD,
+  getBookingHoldExpiry,
   getActiveBookingsFilter,
   getKolkataDateString,
   getKolkataCurrentMinutes,

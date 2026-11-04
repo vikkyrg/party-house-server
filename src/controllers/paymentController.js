@@ -1,24 +1,60 @@
 const { createBookingNotification } = require('../services/bookingNotificationService');
 const PDFDocument = require('pdfkit');
+const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const { sendEmail } = require('../services/emailService');
+const { getBookingHoldExpiry } = require('../utils/dateUtils');
+const {
+  getPaymentSummary,
+  verifiedAmountExpression,
+  paymentRecordsSummaryUpdate,
+} = require('../services/bookingPaymentService');
+
+const expireBookingHold = async (booking, now) => {
+  const expiryUpdate = {
+    status: 'cancelled',
+    cancellationReason: 'Booking reservation expired due to uncompleted advance payment within 10-minute hold window.',
+    cancelledAt: now,
+  };
+
+  booking.status = expiryUpdate.status;
+  booking.cancellationReason = expiryUpdate.cancellationReason;
+  booking.cancelledAt = expiryUpdate.cancelledAt;
+  await booking.save();
+
+  if (booking.isBulkBooking && booking.bulkBookingId) {
+    await Booking.updateMany(
+      {
+        bulkBookingId: booking.bulkBookingId,
+        _id: { $ne: booking._id },
+        status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+        'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
+      },
+      { $set: expiryUpdate }
+    );
+  }
+};
 
 /**
  * Submit UPI transaction reference by the customer after scanning QR
  * Changes payment status to 'submitted' and booking status to 'pending_verification'
  */
 exports.submitUpiPayment = catchAsync(async (req, res, next) => {
-  const { bookingId, upiTransactionId } = req.body;
+  const { bookingId, paymentAmount, transactionReference, upiTransactionId } = req.body;
+  const submittedAmount = Number(paymentAmount);
+  const rawReference = transactionReference || upiTransactionId;
 
-  if (!bookingId || !upiTransactionId || !upiTransactionId.trim()) {
-    return next(new AppError('Booking ID and UPI transaction reference are required', 400));
+  if (!bookingId || !rawReference || typeof rawReference !== 'string' || !rawReference.trim()) {
+    return next(new AppError('Booking ID, payment amount, and UPI transaction reference are required', 400));
+  }
+  if (!Number.isFinite(submittedAmount) || submittedAmount < 1 || Math.round(submittedAmount * 100) !== submittedAmount * 100) {
+    return next(new AppError('Payment amount must be at least ₹1 and use no more than two decimal places.', 400));
   }
 
-  const trimmedRef = upiTransactionId.trim();
-
   // Validate format (UPI references are typically 10 to 22 alphanumeric characters/digits)
+  const trimmedRef = rawReference.trim();
   if (trimmedRef.length < 6 || trimmedRef.length > 35) {
     return next(new AppError('Please enter a valid UPI transaction reference number (UTR/Ref No)', 400));
   }
@@ -36,91 +72,149 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
     return next(new AppError('Not authorized to update this booking', 403));
   }
 
-  if (booking.status === 'confirmed' || booking.payment.status === 'paid') {
-    return next(new AppError('This booking is already confirmed with verified payment', 400));
+  if (booking.status === 'cancelled' || booking.payment.status === 'refunded') {
+    return next(new AppError('This booking is not eligible for payment.', 409));
   }
 
   const now = new Date();
-  const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
-  const isHoldExpired =
-    (booking.holdExpiresAt && booking.holdExpiresAt < now) ||
-    (booking.expiresAt && booking.expiresAt < now) ||
-    (!booking.holdExpiresAt && !booking.expiresAt && booking.createdAt && booking.createdAt < tenMinutesAgo);
+  const holdExpiry = getBookingHoldExpiry(booking);
+  const isPendingBooking = ['pending', 'pending_payment', 'pending_verification'].includes(booking.status);
+  const isHoldExpired = isPendingBooking && holdExpiry && holdExpiry <= now;
 
   // Check if booking has already been cancelled or expired
-  if (
-    booking.status === 'cancelled' ||
-    (isHoldExpired && ['pending', 'pending_payment'].includes(booking.status))
-  ) {
-    if (booking.status !== 'cancelled') {
-      booking.status = 'cancelled';
-      booking.cancellationReason = 'Booking reservation expired due to uncompleted advance payment within 10-minute hold window.';
-      booking.cancelledAt = now;
-      await booking.save();
-    }
+  if (isHoldExpired) {
+    if (booking.status !== 'cancelled') await expireBookingHold(booking, now);
     return next(new AppError('This reservation has expired because the 10-minute hold window closed. Please select an available slot and reserve again.', 409));
   }
 
-  // Ensure no other active confirmed or submitted booking has claimed this slot in the meantime
-  const { doesOverlap, getActiveBookingsFilter } = require('../utils/dateUtils');
-  const conflictFilter = getActiveBookingsFilter({
-    _id: { $ne: booking._id },
-    room: booking.room,
-    date: booking.date,
-  });
-  const conflictingBookings = await Booking.find(conflictFilter);
-  const isConflict = conflictingBookings.some((b) => doesOverlap(b.timeSlot, booking.timeSlot));
-  if (isConflict) {
-    booking.status = 'cancelled';
-    booking.cancellationReason = 'Slot was reserved by another booking before payment submission.';
-    booking.cancelledAt = now;
-    await booking.save();
-    return next(new AppError('This time slot is no longer available as another reservation was completed first.', 409));
+  const summary = getPaymentSummary(booking);
+  if (summary.remainingBalance <= 0) {
+    return next(new AppError('This booking is fully paid. No additional payment is due.', 409));
+  }
+  if (submittedAmount > summary.remainingBalance) {
+    return next(new AppError(`Payment amount cannot exceed the remaining balance of ₹${summary.remainingBalance}.`, 400));
   }
 
-  // Save UPI transaction details
-  const updatePayload = {
-    'payment.status': 'submitted',
-    'payment.method': 'upi',
-    'payment.provider': 'upi_qr',
-    'payment.upiTransactionId': trimmedRef,
-    'payment.submittedAt': new Date(),
-    status: 'pending_verification',
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours protection for admin review
-    holdExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  const normalizedReference = trimmedRef.toUpperCase();
+  const escapedReference = normalizedReference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const duplicateReference = await Booking.exists({
+    $or: [
+      { 'paymentRecords.transactionReferenceNormalized': normalizedReference },
+      { 'payment.upiTransactionId': { $regex: `^${escapedReference}$`, $options: 'i' } },
+    ],
+  });
+  if (duplicateReference) {
+    return next(new AppError('This UPI transaction reference has already been submitted.', 409));
+  }
+
+  const paymentRecordId = new mongoose.Types.ObjectId();
+  const paymentRecord = {
+    _id: paymentRecordId,
+    bookingId: booking._id,
+    paymentAmount: submittedAmount,
+    transactionReference: trimmedRef,
+    transactionReferenceNormalized: normalizedReference,
+    paymentMethod: 'upi',
+    paymentStatus: 'pending_verification',
+    submittedAt: now,
   };
+  const remainingBalanceExpression = {
+    $subtract: [
+      { $ifNull: ['$pricing.total', 0] },
+      verifiedAmountExpression(),
+    ],
+  };
+  let updatedBooking;
+  try {
+    updatedBooking = await Booking.findOneAndUpdate(
+      {
+        _id: booking._id,
+        status: { $in: ['pending', 'pending_payment', 'pending_verification', 'confirmed', 'completed'] },
+        'paymentRecords.transactionReferenceNormalized': { $ne: normalizedReference },
+        $expr: {
+          $and: [
+            { $gt: [remainingBalanceExpression, 0] },
+            { $lte: [submittedAmount, remainingBalanceExpression] },
+          ],
+        },
+      },
+      [
+        {
+          $set: {
+            paymentRecords: {
+              $concatArrays: [{ $ifNull: ['$paymentRecords', []] }, [paymentRecord]],
+            },
+            'payment.legacyVerifiedAmount': {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: [{ $size: { $ifNull: ['$paymentRecords', []] } }, 0] },
+                    { $in: ['$payment.status', ['paid', 'partial', 'partially_paid', 'fully_paid']] },
+                  ],
+                },
+                { $ifNull: ['$payment.amountPaid', 0] },
+                { $ifNull: ['$payment.legacyVerifiedAmount', 0] },
+              ],
+            },
+            status: {
+              $cond: [
+                { $in: ['$status', ['pending', 'pending_payment', 'pending_verification']] },
+                'pending_verification',
+                '$status',
+              ],
+            },
+            'payment.method': 'upi',
+            'payment.provider': 'upi_qr',
+            'payment.upiTransactionId': trimmedRef,
+            'payment.submittedAt': now,
+          },
+        },
+        { $set: paymentRecordsSummaryUpdate() },
+      ],
+      { new: true, runValidators: true }
+    );
+  } catch (error) {
+    if (error?.code === 11000) {
+      return next(new AppError('This UPI transaction reference has already been submitted.', 409));
+    }
+    throw error;
+  }
 
-  booking.payment.status = updatePayload['payment.status'];
-  booking.payment.method = updatePayload['payment.method'];
-  booking.payment.provider = updatePayload['payment.provider'];
-  booking.payment.upiTransactionId = updatePayload['payment.upiTransactionId'];
-  booking.payment.submittedAt = updatePayload['payment.submittedAt'];
-  booking.status = updatePayload.status;
-  booking.expiresAt = updatePayload.expiresAt;
-  booking.holdExpiresAt = updatePayload.holdExpiresAt;
+  if (!updatedBooking) {
+    return next(new AppError('Payment exceeds the current remaining balance or the booking is no longer eligible for payment.', 409));
+  }
 
-  await booking.save();
-
-  // If this booking is part of a bulk group, also update all other entries in the group
-  if (booking.isBulkBooking && booking.bulkBookingId) {
+  if (updatedBooking.isBulkBooking && updatedBooking.bulkBookingId) {
     await Booking.updateMany(
-      { bulkBookingId: booking.bulkBookingId, _id: { $ne: booking._id } },
-      { $set: updatePayload }
+      {
+        bulkBookingId: updatedBooking.bulkBookingId,
+        _id: { $ne: updatedBooking._id },
+        status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+      },
+      {
+        $set: {
+          status: 'pending_verification',
+          'payment.status': 'pending_verification',
+          'payment.upiTransactionId': trimmedRef,
+          'payment.submittedAt': now,
+        },
+      }
     );
   }
 
+  const paymentSummary = getPaymentSummary(updatedBooking);
   res.json({
     success: true,
-    message: 'Payment details submitted successfully. Awaiting admin verification.',
+    message: 'Payment submitted successfully. It is awaiting admin verification.',
     data: {
-      bookingId: booking._id,
-      bookingReference: booking.bookingId,
-      isBulkBooking: !!booking.isBulkBooking,
-      bulkBookingId: booking.bulkBookingId || null,
-      status: booking.status,
-      paymentStatus: booking.payment.status,
-      upiTransactionId: booking.payment.upiTransactionId,
-      submittedAt: booking.payment.submittedAt,
+      bookingId: updatedBooking._id,
+      bookingReference: updatedBooking.bookingId,
+      status: updatedBooking.status,
+      paymentStatus: updatedBooking.payment.status,
+      paymentRecords: updatedBooking.paymentRecords,
+      paymentSummary,
+      expiresAt: updatedBooking.expiresAt,
+      holdExpiresAt: updatedBooking.holdExpiresAt,
     },
   });
 });
@@ -140,8 +234,14 @@ exports.checkPaymentStatus = catchAsync(async (req, res, next) => {
   }
 
   const now = new Date();
-  const effectiveExpiry = booking.holdExpiresAt || booking.expiresAt || new Date(new Date(booking.createdAt).getTime() + 10 * 60 * 1000);
-  const isExpired = ['pending', 'pending_payment'].includes(booking.status) && ['pending', 'failed'].includes(booking.payment?.status) && effectiveExpiry < now;
+  const effectiveExpiry = getBookingHoldExpiry(booking);
+  const isExpired =
+    ['pending', 'pending_payment', 'pending_verification'].includes(booking.status) &&
+    ['pending', 'failed', 'submitted', 'pending_verification'].includes(booking.payment?.status) &&
+    effectiveExpiry &&
+    effectiveExpiry <= now;
+
+  if (isExpired) await expireBookingHold(booking, now);
 
   let bulkEntries = undefined;
   if (booking.isBulkBooking && booking.bulkBookingId) {
@@ -164,9 +264,11 @@ exports.checkPaymentStatus = catchAsync(async (req, res, next) => {
       amountPaid: booking.payment?.amountPaid || 0,
       paidAt: booking.payment?.paidAt,
       rejectedReason: booking.payment?.rejectedReason,
-      expiresAt: booking.expiresAt || effectiveExpiry,
-      holdExpiresAt: booking.holdExpiresAt || effectiveExpiry,
+      expiresAt: effectiveExpiry,
+      holdExpiresAt: effectiveExpiry,
       isExpired,
+      paymentRecords: booking.paymentRecords,
+      paymentSummary: getPaymentSummary(booking),
     },
   });
 });

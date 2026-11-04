@@ -229,6 +229,7 @@ describe('Bulk Booking & Guest Authentication Integration Tests', () => {
       .set('Authorization', `Bearer ${customerToken}`)
       .send({
         bookingId: primaryId,
+        paymentAmount: bulkRes.body.data.primaryBooking.pricing.total,
         upiTransactionId: 'UTR998877665544',
       });
 

@@ -3,30 +3,22 @@ const logger = require('../utils/logger');
 const { BOOKING_HOLD_DURATION_MS } = require('../utils/dateUtils');
 
 /**
- * Release pending bookings that were abandoned and passed their 10-minute hold expiration window,
- * provided payment has not been initiated/submitted or confirmed.
- * Handles holdExpiresAt, expiresAt, and legacy bookings without expiry timestamps (older than 10 minutes).
+ * Release unconfirmed bookings after their 10-minute hold expires, including submitted
+ * payments that have not yet been verified.
  */
 const cleanupExpiredBookings = async () => {
   try {
     const now = new Date();
-    const tenMinutesAgo = new Date(now.getTime() - (BOOKING_HOLD_DURATION_MS || 10 * 60 * 1000));
+    const tenMinutesAgo = new Date(now.getTime() - BOOKING_HOLD_DURATION_MS);
 
-    // Match unpaid pending bookings that have expired
     const result = await Booking.updateMany(
       {
-        status: { $in: ['pending', 'pending_payment'] },
-        'payment.status': { $in: ['pending', 'failed'] },
+        status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
+        'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
         $or: [
           { holdExpiresAt: { $exists: true, $ne: null, $lte: now } },
           { expiresAt: { $exists: true, $ne: null, $lte: now } },
-          {
-            $and: [
-              { $or: [{ holdExpiresAt: { $exists: false } }, { holdExpiresAt: null }] },
-              { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }] },
-              { createdAt: { $lte: tenMinutesAgo } },
-            ],
-          },
+          { createdAt: { $lte: tenMinutesAgo } },
         ],
       },
       {

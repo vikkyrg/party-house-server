@@ -16,6 +16,7 @@ const { sendEmail } = require('../services/emailService');
 const { sendSMS } = require('../services/smsService');
 const appConfig = require('../config/app');
 const { GST_RATE } = require('../utils/constants');
+const settingService = require('../services/settingService');
 
 const {
   parseTimeToMinutes,
@@ -24,13 +25,14 @@ const {
   normalizeBookingDate,
   formatDateToYMD,
   getActiveBookingsFilter,
-  BOOKING_HOLD_DURATION_MS,
   getKolkataDateString,
   getKolkataCurrentMinutes,
   isSlotInPast,
 } = require('../utils/dateUtils');
+const { cleanupExpiredBookings } = require('../services/bookingExpiryService');
 
 exports.createBooking = catchAsync(async (req, res, next) => {
+  await cleanupExpiredBookings();
   const { theaterId, roomId, locationId, date, bookingDate, timeSlot, timeSlotId, eventTypeId, addOns, customerDetails, discountCode } =
     req.body;
 
@@ -262,10 +264,11 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   if (discountCode) discount = subtotal * 0.1;
 
   const total = subtotal + tax - discount;
-  const advanceAmount = total; // Full payment required
-  const balanceAmount = 0;
-  const holdDuration = BOOKING_HOLD_DURATION_MS || 10 * 60 * 1000;
-  const holdExpiresAt = new Date(Date.now() + holdDuration); // Exactly 10-minute hold window
+  const configuredAdvance = await settingService.getAdvancePaymentAmount();
+  // Advance cannot exceed the booking total/subtotal
+  const advanceAmount = Math.min(configuredAdvance, total);
+  const balanceAmount = Math.max(0, total - advanceAmount);
+  const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
   const expiresAt = holdExpiresAt;
 
   try {
@@ -622,6 +625,7 @@ exports.downloadInvoice = catchAsync(async (req, res, next) => {
  * - Calculates individual + combined total & advance payable amounts.
  */
 exports.createBulkBooking = catchAsync(async (req, res, next) => {
+  await cleanupExpiredBookings();
   const { bookings: requestedBookings, customerDetails, discountCode } = req.body;
 
   if (!requestedBookings || !Array.isArray(requestedBookings) || requestedBookings.length === 0) {
@@ -663,8 +667,7 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
   const bulkPrefix = 'CS-BULK';
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const bulkId = `${bulkPrefix}-${dateStr}-${Date.now().toString().slice(-4)}`;
-  const holdDuration = BOOKING_HOLD_DURATION_MS || 10 * 60 * 1000;
-  const holdExpiresAt = new Date(Date.now() + holdDuration);
+  const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
   for (let idx = 0; idx < requestedBookings.length; idx++) {
     const item = requestedBookings[idx];
@@ -808,8 +811,9 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
     let discount = 0;
     if (discountCode) discount = subtotal * 0.1;
     const total = subtotal + tax - discount;
-    const advanceAmount = total; // Full payment required
-    const balanceAmount = 0;
+    const configuredAdvance = await settingService.getAdvancePaymentAmount();
+    const advanceAmount = Math.min(configuredAdvance, total);
+    const balanceAmount = Math.max(0, total - advanceAmount);
 
     combinedTotal += total;
     combinedAdvance += advanceAmount;

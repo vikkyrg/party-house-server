@@ -95,12 +95,27 @@ const BookingSchema = new mongoose.Schema(
     payment: {
       status: {
         type: String,
-        enum: ['pending', 'processing', 'submitted', 'paid', 'failed', 'rejected', 'refunded', 'partial'],
+        enum: [
+          'pending',
+          'processing',
+          'submitted',
+          'paid',
+          'failed',
+          'rejected',
+          'refunded',
+          'partial',
+          'unpaid',
+          'pending_verification',
+          'partially_paid',
+          'fully_paid',
+          'payment_rejected',
+        ],
         default: 'pending',
       },
       method: { type: String, enum: ['upi', 'cash', 'card', 'bank_transfer', 'qr_code'], default: 'upi' },
       provider: { type: String, default: 'upi_qr' },
       amountPaid: { type: Number, default: 0 },
+      legacyVerifiedAmount: { type: Number, default: 0, min: 0 },
       currency: { type: String, default: 'INR' },
       upiTransactionId: { type: String, trim: true },
       submittedAt: Date,
@@ -114,6 +129,26 @@ const BookingSchema = new mongoose.Schema(
       refundAmount: Number,
       failureReason: String,
     },
+    paymentRecords: [
+      {
+        bookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking', required: true },
+        paymentAmount: { type: Number, required: true, min: 0.01 },
+        transactionReference: { type: String, required: true, trim: true },
+        transactionReferenceNormalized: { type: String, required: true, trim: true },
+        paymentMethod: { type: String, enum: ['upi'], default: 'upi' },
+        paymentStatus: {
+          type: String,
+          enum: ['pending_verification', 'verified', 'rejected'],
+          default: 'pending_verification',
+        },
+        submittedAt: { type: Date, default: Date.now },
+        verifiedAt: Date,
+        verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        rejectedAt: Date,
+        rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        rejectionReason: String,
+      },
+    ],
     status: {
       type: String,
       enum: ['pending', 'pending_payment', 'pending_verification', 'confirmed', 'in-progress', 'completed', 'cancelled', 'no-show'],
@@ -153,6 +188,10 @@ BookingSchema.index(
 BookingSchema.index({ user: 1, createdAt: -1 });
 BookingSchema.index({ status: 1, date: 1 });
 BookingSchema.index({ 'payment.status': 1, createdAt: -1 });
+BookingSchema.index(
+  { 'paymentRecords.transactionReferenceNormalized': 1 },
+  { unique: true, sparse: true }
+);
 
 BookingSchema.pre('validate', async function (next) {
   if (!this.bookingId) {
