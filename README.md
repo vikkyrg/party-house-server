@@ -123,7 +123,7 @@ src/
 ## Deployment
 
 1. Set all production environment variables
-2. Enable HTTPS and update `CORS_ORIGIN`
+2. Enable HTTPS. This API does not enable cross-origin browser access.
 3. Use PM2 or similar process manager:
 
 ```bash

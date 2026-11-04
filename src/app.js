@@ -1,12 +1,10 @@
 const express = require('express');
 const helmet = require('helmet');
-const cors = require('cors');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const mongoSanitize = require('express-mongo-sanitize');
 const hpp = require('hpp');
 const xss = require('xss-clean');
-const { parseCorsOrigins } = require('./utils/helpers');
 const { apiLimiter, authLimiter } = require('./middleware/rateLimiter');
 const routes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
@@ -19,15 +17,6 @@ app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
     crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
-  })
-);
-
-app.use(
-  cors({
-    origin: (origin, callback) => callback(null, true),
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
   })
 );
 
