@@ -132,6 +132,7 @@ const BookingSchema = new mongoose.Schema(
     paymentRecords: [
       {
         bookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking', required: true },
+        customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         paymentAmount: { type: Number, required: true, min: 0.01 },
         transactionReference: { type: String, required: true, trim: true },
         transactionReferenceNormalized: { type: String, required: true, trim: true },

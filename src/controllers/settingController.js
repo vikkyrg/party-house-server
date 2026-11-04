@@ -12,6 +12,7 @@ exports.getPublicPaymentSettings = catchAsync(async (req, res) => {
     success: true,
     data: {
       advancePaymentAmount: advanceAmount,
+      upiId: process.env.UPI_ID || '',
     },
   });
 });
@@ -64,4 +65,3 @@ exports.updateAdvancePaymentSetting = catchAsync(async (req, res, next) => {
     },
   });
 });
-

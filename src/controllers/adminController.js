@@ -540,6 +540,12 @@ const updatePaymentRecord = async (booking, req, res, next) => {
   };
   const verifiedAmount = verifiedAmountExpression();
   const isVerification = action === 'verifyPayment';
+  const requiredAdvance = {
+    $min: [
+      { $ifNull: ['$pricing.advanceAmount', { $ifNull: ['$pricing.total', 0] }] },
+      { $ifNull: ['$pricing.total', 0] },
+    ],
+  };
   const filter = {
     _id: booking._id,
     status: { $nin: ['cancelled'] },
@@ -571,7 +577,19 @@ const updatePaymentRecord = async (booking, req, res, next) => {
             ? {
                 $cond: [
                   { $in: ['$status', ['pending', 'pending_payment', 'pending_verification']] },
-                  'confirmed',
+                  {
+                    $cond: [
+                      { $gte: ['$payment.amountPaid', requiredAdvance] },
+                      'confirmed',
+                      {
+                        $cond: [
+                          { $gt: [countPaymentStatusExpression('pending_verification'), 0] },
+                          'pending_verification',
+                          'pending_payment',
+                        ],
+                      },
+                    ],
+                  },
                   '$status',
                 ],
               }
@@ -592,8 +610,20 @@ const updatePaymentRecord = async (booking, req, res, next) => {
       ...(isVerification
         ? [{
             $set: {
-              confirmedAt: { $ifNull: ['$confirmedAt', now] },
-              confirmedBy: { $ifNull: ['$confirmedBy', req.user._id] },
+              confirmedAt: {
+                $cond: [
+                  { $eq: ['$status', 'confirmed'] },
+                  { $ifNull: ['$confirmedAt', now] },
+                  '$confirmedAt',
+                ],
+              },
+              confirmedBy: {
+                $cond: [
+                  { $eq: ['$status', 'confirmed'] },
+                  { $ifNull: ['$confirmedBy', req.user._id] },
+                  '$confirmedBy',
+                ],
+              },
             },
           }]
         : []),

@@ -312,6 +312,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
       .expect(201);
     const bookingId = createRes.body.data._id;
     const total = createRes.body.data.pricing.total;
+    const advanceRequired = createRes.body.data.pricing.advanceAmount;
     const firstAmount = Math.min(250, total - 2);
     const secondAmount = firstAmount;
     const finalAmount = total - firstAmount - secondAmount;
@@ -330,6 +331,8 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     const first = await submit(firstAmount, 'UTR-PARTIAL-0001').expect(200);
     expect(first.body.data.paymentSummary.verifiedAmountPaid).toBe(0);
     expect(first.body.data.paymentSummary.pendingVerificationAmount).toBe(firstAmount);
+    expect(first.body.data.paymentSummary.totalCustomerSubmittedAmount).toBe(firstAmount);
+    expect(first.body.data.paymentRecords[0].customerId).toBe(createRes.body.data.user);
     expect(first.body.data.paymentSummary.remainingBalance).toBe(total);
     await submit(firstAmount, 'UTR-PARTIAL-0001').expect(409);
 
@@ -340,6 +343,9 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     const verifiedFirst = await verify(firstRecordId).expect(200);
     expect(verifiedFirst.body.data.paymentSummary.verifiedAmountPaid).toBe(firstAmount);
     expect(verifiedFirst.body.data.paymentSummary.remainingBalance).toBe(total - firstAmount);
+    expect(verifiedFirst.body.data.status).toBe(
+      firstAmount >= advanceRequired ? 'confirmed' : 'pending_verification'
+    );
     await verify(firstRecordId).expect(409);
 
     const bookingAfterSecond = await Booking.findById(bookingId);
@@ -349,6 +355,9 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     const verifiedSecond = await verify(secondRecord._id).expect(200);
     expect(verifiedSecond.body.data.paymentSummary.verifiedAmountPaid).toBe(firstAmount + secondAmount);
     expect(verifiedSecond.body.data.paymentSummary.paymentStatus).toBe('partially_paid');
+    expect(verifiedSecond.body.data.status).toBe(
+      firstAmount + secondAmount >= advanceRequired ? 'confirmed' : 'pending_payment'
+    );
 
     const rejectedSubmission = await submit(1, 'UTR-PARTIAL-REJECT-0001').expect(200);
     const rejectedRecord = rejectedSubmission.body.data.paymentRecords.find(

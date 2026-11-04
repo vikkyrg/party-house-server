@@ -65,10 +65,8 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
   }
 
   // Authorization check: must be owner or admin
-  if (
-    booking.user.toString() !== req.user._id.toString() &&
-    !['admin', 'super-admin'].includes(req.user.role)
-  ) {
+  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
+  if (!req.user || (!isAdmin && booking.user.toString() !== req.user._id.toString())) {
     return next(new AppError('Not authorized to update this booking', 403));
   }
 
@@ -111,6 +109,7 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
   const paymentRecord = {
     _id: paymentRecordId,
     bookingId: booking._id,
+    customerId: req.user?._id,
     paymentAmount: submittedAmount,
     transactionReference: trimmedRef,
     transactionReferenceNormalized: normalizedReference,
@@ -226,10 +225,8 @@ exports.checkPaymentStatus = catchAsync(async (req, res, next) => {
   const booking = await Booking.findById(req.params.bookingId);
   if (!booking) return next(new AppError('Booking not found', 404));
 
-  if (
-    booking.user.toString() !== req.user._id.toString() &&
-    !['admin', 'super-admin'].includes(req.user.role)
-  ) {
+  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
+  if (!req.user || (!isAdmin && booking.user.toString() !== req.user._id.toString())) {
     return next(new AppError('Not authorized', 403));
   }
 

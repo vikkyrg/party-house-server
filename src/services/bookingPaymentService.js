@@ -19,6 +19,12 @@ const getPaymentSummary = (booking) => {
         ? Number(booking.payment?.amountPaid || booking.pricing?.advanceAmount || 0)
         : 0)
   );
+  const totalCustomerSubmittedAmount = roundMoney(
+    records.reduce((sum, record) => sum + Number(record.paymentAmount || 0), 0) +
+      (records.length === 0 && booking.payment?.upiTransactionId
+        ? Number(booking.payment?.amountPaid || booking.pricing?.advanceAmount || 0)
+        : 0)
+  );
   const remainingBalance = roundMoney(Math.max(0, total - verifiedAmountPaid));
 
   let paymentStatus = 'unpaid';
@@ -31,6 +37,8 @@ const getPaymentSummary = (booking) => {
 
   return {
     totalBookingAmount: total,
+    advanceAmountRequired: roundMoney(booking.pricing?.advanceAmount || 0),
+    totalCustomerSubmittedAmount,
     verifiedAmountPaid,
     pendingVerificationAmount,
     remainingBalance,
