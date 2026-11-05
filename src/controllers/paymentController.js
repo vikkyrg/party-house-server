@@ -1,4 +1,5 @@
 const { createBookingNotification } = require('../services/bookingNotificationService');
+const logger = require('../utils/logger');
 const PDFDocument = require('pdfkit');
 const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
@@ -202,6 +203,13 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
   }
 
   const paymentSummary = getPaymentSummary(updatedBooking);
+
+  // Trigger admin in-app notification count
+  createBookingNotification({
+    booking: updatedBooking,
+    type: 'payment_received',
+  }).catch(() => {});
+
   res.json({
     success: true,
     message: 'Payment submitted successfully. It is awaiting admin verification.',
