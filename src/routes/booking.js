@@ -1,9 +1,11 @@
 const express = require('express');
 const bookingController = require('../controllers/bookingController');
 const { protect, restrictTo } = require('../middleware/auth');
+const { resolveCustomerAuth } = require('../middleware/auth');
 const validateRequest = require('../middleware/validateRequest');
 const {
   createBookingSchema,
+  createBookingHoldSchema,
   cancelBookingSchema,
   checkAvailabilitySchema,
 } = require('../validators/bookingValidator');
@@ -33,8 +35,15 @@ router.get(
   bookingController.checkAvailability
 );
 
+router.post(
+  '/hold',
+  resolveCustomerAuth,
+  bookingLimiter,
+  validateRequest(createBookingHoldSchema),
+  bookingController.createBookingHold
+);
+
 // Public / Guest / Customer booking creation endpoints (uses resolveCustomerAuth)
-const { resolveCustomerAuth } = require('../middleware/auth');
 const { bulkBookingSchema } = require('../validators/bookingValidator');
 
 router.post(

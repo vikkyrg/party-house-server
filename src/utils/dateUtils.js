@@ -102,7 +102,6 @@ const getActiveBookingsFilter = (baseFilter = {}) => {
   const now = new Date();
   const tenMinutesAgo = new Date(now.getTime() - BOOKING_HOLD_DURATION_MS);
   const pendingHoldStatuses = ['pending', 'pending_payment', 'pending_verification'];
-  const unpaidPaymentStatuses = ['pending', 'failed', 'submitted', 'pending_verification'];
 
   return {
     ...baseFilter,
@@ -110,17 +109,14 @@ const getActiveBookingsFilter = (baseFilter = {}) => {
     $nor: [
       {
         status: { $in: pendingHoldStatuses },
-        'payment.status': { $in: unpaidPaymentStatuses },
         holdExpiresAt: { $exists: true, $ne: null, $lte: now },
       },
       {
         status: { $in: pendingHoldStatuses },
-        'payment.status': { $in: unpaidPaymentStatuses },
         expiresAt: { $exists: true, $ne: null, $lte: now },
       },
       {
         status: { $in: pendingHoldStatuses },
-        'payment.status': { $in: unpaidPaymentStatuses },
         createdAt: { $lte: tenMinutesAgo },
       },
     ],

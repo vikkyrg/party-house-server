@@ -176,16 +176,6 @@ const BookingSchema = new mongoose.Schema(
 );
 
 BookingSchema.index({ theater: 1, date: 1 });
-BookingSchema.index(
-  { room: 1, date: 1, timeSlot: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      room: { $exists: true },
-      status: { $in: ['pending', 'pending_payment', 'pending_verification', 'confirmed', 'in-progress', 'completed'] },
-    },
-  }
-);
 BookingSchema.index({ user: 1, createdAt: -1 });
 BookingSchema.index({ status: 1, date: 1 });
 BookingSchema.index({ 'payment.status': 1, createdAt: -1 });
@@ -198,8 +188,7 @@ BookingSchema.pre('validate', async function (next) {
   if (!this.bookingId) {
     const prefix = process.env.BOOKING_ID_PREFIX || 'CS';
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const count = await this.constructor.countDocuments();
-    this.bookingId = `${prefix}-${date}-${String(count + 1).padStart(3, '0')}`;
+    this.bookingId = `${prefix}-${date}-${this._id.toString().slice(-6).toUpperCase()}`;
   }
   if (this.expiresAt && !this.holdExpiresAt) {
     this.holdExpiresAt = this.expiresAt;

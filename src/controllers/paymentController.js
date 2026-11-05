@@ -12,6 +12,10 @@ const {
   verifiedAmountExpression,
   paymentRecordsSummaryUpdate,
 } = require('../services/bookingPaymentService');
+const {
+  releaseRoomSlotReservation,
+  confirmRoomSlotReservation,
+} = require('../services/roomSlotReservationService');
 
 const expireBookingHold = async (booking, now) => {
   const expiryUpdate = {
@@ -24,6 +28,7 @@ const expireBookingHold = async (booking, now) => {
   booking.cancellationReason = expiryUpdate.cancellationReason;
   booking.cancelledAt = expiryUpdate.cancelledAt;
   await booking.save();
+  await releaseRoomSlotReservation(booking);
 
   if (booking.isBulkBooking && booking.bulkBookingId) {
     await Booking.updateMany(
@@ -182,6 +187,9 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
 
   if (!updatedBooking) {
     return next(new AppError('Payment exceeds the current remaining balance or the booking is no longer eligible for payment.', 409));
+  }
+  if (updatedBooking.status === 'confirmed') {
+    await confirmRoomSlotReservation(updatedBooking);
   }
 
   if (updatedBooking.isBulkBooking && updatedBooking.bulkBookingId) {

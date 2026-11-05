@@ -6,6 +6,7 @@ const Theater = require('../../src/models/Theater');
 const Room = require('../../src/models/Room');
 const EventType = require('../../src/models/EventType');
 const Booking = require('../../src/models/Booking');
+const RoomSlotReservation = require('../../src/models/RoomSlotReservation');
 const { connectDB, disconnectDB, clearDB } = require('../fixtures/db');
 const { cleanupExpiredBookings } = require('../../src/services/bookingExpiryService');
 const { normalizeBookingDate, getActiveBookingsFilter } = require('../../src/utils/dateUtils');
@@ -142,6 +143,85 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     const holdMs = new Date(booking.holdExpiresAt).getTime() - new Date(booking.createdAt).getTime();
     expect(holdMs).toBeGreaterThanOrEqual(9.9 * 60 * 1000);
     expect(holdMs).toBeLessThanOrEqual(10.1 * 60 * 1000);
+  });
+
+  it('creates an atomic hold at slot selection and uses it for booking creation', async () => {
+    const holdId = new mongoose.Types.ObjectId().toString();
+    const holdRes = await request(app)
+      .post('/api/v1/bookings/hold')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        theaterId: theater._id,
+        roomId: room._id,
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        timeSlotId: room.slots[0]._id,
+        duration: 1,
+        holdId,
+      })
+      .expect(201);
+
+    const bookingRes = await request(app)
+      .post('/api/v1/bookings')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        ...validBookingPayload,
+        theaterId: theater._id,
+        roomId: room._id,
+        eventTypeId: eventType._id,
+        slotHoldId: holdRes.body.data.holdId,
+        timeSlotId: room.slots[0]._id,
+      })
+      .expect(201);
+
+    expect(bookingRes.body.data._id).toBe(holdId);
+    expect(bookingRes.body.data.timeSlotId).toBe(room.slots[0]._id.toString());
+    expect(bookingRes.body.data.duration).toBe(1);
+  });
+
+  it('releases an expired abandoned hold and allows the slot to be reserved again', async () => {
+    const holdId = new mongoose.Types.ObjectId().toString();
+    await request(app)
+      .post('/api/v1/bookings/hold')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        theaterId: theater._id,
+        roomId: room._id,
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        timeSlotId: room.slots[0]._id,
+        duration: 1,
+        holdId,
+      })
+      .expect(201);
+
+    const day = await RoomSlotReservation.findOne({ room: room._id });
+    day.reservations[0].expiresAt = new Date(Date.now() - 1000);
+    await day.save();
+
+    const availability = await request(app)
+      .get('/api/v1/bookings/check-availability')
+      .query({ roomId: room._id.toString(), date: futureBookingDate })
+      .expect(200);
+    const slot = availability.body.data.slots.find((item) => item.time === validBookingPayload.timeSlot);
+    expect(slot.available).toBe(true);
+
+    await request(app)
+      .post('/api/v1/bookings')
+      .set('Authorization', `Bearer ${customer2Token}`)
+      .send({
+        ...validBookingPayload,
+        theaterId: theater._id,
+        roomId: room._id,
+        eventTypeId: eventType._id,
+        customerDetails: {
+          ...validBookingPayload.customerDetails,
+          name: 'Customer B',
+          email: 'customerb@example.com',
+          phone: '9876543211',
+        },
+      })
+      .expect(201);
   });
 
   it('2. The slot appears as Temporarily Reserved, not Sold Out, while hold is active', async () => {

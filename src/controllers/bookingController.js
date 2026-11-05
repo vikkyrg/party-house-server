@@ -31,11 +31,117 @@ const {
   isSlotInPast,
 } = require('../utils/dateUtils');
 const { cleanupExpiredBookings } = require('../services/bookingExpiryService');
+const {
+  reserveRoomSlot,
+  getOwnedActiveRoomSlotReservation,
+  getActiveRoomSlotReservations,
+  releaseRoomSlotReservation,
+  confirmRoomSlotReservation,
+} = require('../services/roomSlotReservationService');
+
+exports.createBookingHold = catchAsync(async (req, res, next) => {
+  const { theaterId, roomId, date, timeSlot, timeSlotId, duration } = req.body;
+  const normalizedDate = normalizeBookingDate(date);
+  const dateString = formatDateToYMD(date);
+  if (!normalizedDate || dateString < getKolkataDateString()) {
+    return next(new AppError('Booking date must be today or a future date.', 400));
+  }
+
+  const room = await Room.findOne({ _id: roomId, theater: theaterId, isActive: true });
+  const theater = room ? await Theater.findOne({ _id: theaterId, isActive: true }) : null;
+  if (!room || !theater) return next(new AppError('Room or theater not found or inactive.', 404));
+
+  const requestedInterval = getSlotInterval(timeSlot);
+  const selectedSlot = timeSlotId
+    ? room.slots.id(timeSlotId)
+    : room.slots.find((slot) => {
+        const interval = getSlotInterval(`${slot.startTime} - ${slot.endTime}`);
+        return interval && requestedInterval && interval.start === requestedInterval.start && interval.end === requestedInterval.end;
+      });
+  const canonicalTimeSlot = selectedSlot && `${selectedSlot.startTime} - ${selectedSlot.endTime}`;
+  const interval = canonicalTimeSlot && getSlotInterval(canonicalTimeSlot);
+  if (
+    !selectedSlot ||
+    selectedSlot.isActive === false ||
+    !requestedInterval ||
+    !interval ||
+    requestedInterval.start !== interval.start ||
+    requestedInterval.end !== interval.end
+  ) {
+    return next(new AppError('The selected time does not match an active room slot.', 400));
+  }
+
+  const slotDuration = Math.round((interval.end - interval.start) / 60);
+  if (slotDuration !== Number(duration)) {
+    return next(new AppError('The selected duration does not match the room time slot.', 400));
+  }
+  if (isSlotInPast(dateString, selectedSlot.startTime)) {
+    return next(new AppError('This time slot has already started or passed.', 400));
+  }
+
+  const existingBooking = await Booking.findOne({
+    ...getActiveBookingsFilter({
+      room: roomId,
+      date: normalizedDate,
+      user: req.user._id,
+    }),
+    timeSlot: canonicalTimeSlot,
+  });
+  if (existingBooking) {
+    return res.json({
+      success: true,
+      data: {
+        holdId: existingBooking._id,
+        expiresAt: existingBooking.holdExpiresAt || existingBooking.expiresAt,
+        roomId,
+        date: dateString,
+        timeSlot: canonicalTimeSlot,
+        duration: slotDuration,
+      },
+    });
+  }
+
+  const activeBookings = await Booking.find(
+    getActiveBookingsFilter({ room: roomId, date: normalizedDate })
+  ).select('timeSlot');
+  if (activeBookings.some((booking) => doesOverlap(booking.timeSlot, canonicalTimeSlot))) {
+    return next(new AppError('This time slot has just been booked. Please select another available slot.', 409));
+  }
+
+  const holdId = req.body.holdId
+    ? new mongoose.Types.ObjectId(req.body.holdId)
+    : new mongoose.Types.ObjectId();
+  const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const reserved = await reserveRoomSlot({
+    roomId,
+    date: normalizedDate,
+    bookingId: holdId,
+    customerId: req.user._id,
+    timeSlot: canonicalTimeSlot,
+    expiresAt: holdExpiresAt,
+  });
+  if (!reserved) {
+    return next(new AppError('This time slot has just been booked. Please select another available slot.', 409));
+  }
+
+  res.status(201).json({
+    success: true,
+    data: {
+      holdId,
+      expiresAt: holdExpiresAt,
+      roomId,
+      date: dateString,
+      timeSlot: canonicalTimeSlot,
+      duration: slotDuration,
+    },
+  });
+});
 
 exports.createBooking = catchAsync(async (req, res, next) => {
   cleanupExpiredBookings().catch((err) => logger.error('Error during background booking cleanup:', err));
-  const { theaterId, roomId, locationId, date, bookingDate, timeSlot, timeSlotId, eventTypeId, addOns, customerDetails, discountCode } =
+  const { theaterId, roomId, locationId, date, bookingDate, timeSlotId, eventTypeId, addOns, customerDetails, discountCode } =
     req.body;
+  let timeSlot = req.body.timeSlot;
 
   let duration = parseInt(req.body.duration, 10);
   if (!duration || ![1, 2, 3].includes(duration)) {
@@ -84,15 +190,32 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     return next(new AppError('This time slot has already started or passed and cannot be booked.', 400));
   }
 
-  const configuredSlots = (room.slots || []).filter((slot) => slot.isActive !== false).map(
-    (slot) => `${slot.startTime} - ${slot.endTime}`
-  );
-  if (!configuredSlots.includes(timeSlot)) {
+  const requestedInterval = getSlotInterval(timeSlot);
+  const selectedSlot = timeSlotId
+    ? room.slots.id(timeSlotId)
+    : (room.slots || []).find((slot) => {
+        const interval = getSlotInterval(`${slot.startTime} - ${slot.endTime}`);
+        return interval && requestedInterval && interval.start === requestedInterval.start && interval.end === requestedInterval.end;
+      });
+  if (!selectedSlot || selectedSlot.isActive === false) {
     return next(new AppError('The selected time slot is not available for this theater.', 400));
   }
-  if (timeSlotId && !room.slots.id(timeSlotId)) {
-    return next(new AppError('The selected time slot is not available for this room.', 400));
+  const canonicalTimeSlot = `${selectedSlot.startTime} - ${selectedSlot.endTime}`;
+  const canonicalInterval = getSlotInterval(canonicalTimeSlot);
+  if (
+    !requestedInterval ||
+    !canonicalInterval ||
+    requestedInterval.start !== canonicalInterval.start ||
+    requestedInterval.end !== canonicalInterval.end
+  ) {
+    return next(new AppError('The selected time does not match the selected room slot.', 400));
   }
+  timeSlot = canonicalTimeSlot;
+  const slotDuration = Math.round((canonicalInterval.end - canonicalInterval.start) / 60);
+  if (![1, 2, 3].includes(slotDuration) || (req.body.duration && Number(req.body.duration) !== slotDuration)) {
+    return next(new AppError('The selected duration does not match the room time slot.', 400));
+  }
+  duration = slotDuration;
 
   let selectedCake = null;
   if (req.body.cake) {
@@ -121,15 +244,13 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     useTransaction = false;
   }
 
-  // 1. Idempotency & Duplicate Prevention: Check if the exact same reservation was submitted in the last 2 minutes
-  const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+  // 1. Idempotency & Duplicate Prevention: Check if the exact same reservation was submitted in the last 10 minutes
   const duplicatePending = await Booking.findOne({
-    room: roomId,
-    date: normalizedBookingDate,
-    timeSlot,
-    user: req.user._id,
-    createdAt: { $gte: twoMinutesAgo },
-    status: { $in: ['pending', 'pending_payment', 'pending_verification', 'confirmed'] },
+    ...getActiveBookingsFilter({ room: roomId, date: normalizedBookingDate, timeSlot }),
+    $or: [
+      { user: req.user._id },
+      { 'customerDetails.phone': { $regex: new RegExp(`${(customerDetails?.phone || '').trim().replace(/[\s\-()]/g, '').replace(/^(\+91|91|0)/, '')}$`) } },
+    ],
   });
   if (duplicatePending) {
     // Return existing booking directly to prevent accidental duplicate booking from double-clicks or re-renders
@@ -268,12 +389,53 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   const configuredAdvance = await settingService.getAdvancePaymentAmount();
   // Advance cannot exceed the booking total/subtotal
   const advanceAmount = Math.min(configuredAdvance, total);
-  const balanceAmount = Math.max(0, total - advanceAmount);
+  const balanceAmount = total;
   const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
   const expiresAt = holdExpiresAt;
+  const reservationBookingId = req.body.slotHoldId
+    ? new mongoose.Types.ObjectId(req.body.slotHoldId)
+    : new mongoose.Types.ObjectId();
 
   try {
+    const activeHold = req.body.slotHoldId
+      ? await getOwnedActiveRoomSlotReservation({
+          roomId,
+          date: normalizedBookingDate,
+          bookingId: reservationBookingId,
+          customerId: req.user._id,
+          timeSlot,
+        })
+      : null;
+    const hasReservation = req.body.slotHoldId
+      ? Boolean(
+          activeHold &&
+            (await reserveRoomSlot({
+              roomId,
+              date: normalizedBookingDate,
+              bookingId: reservationBookingId,
+              customerId: req.user._id,
+              timeSlot,
+              expiresAt: holdExpiresAt,
+            }))
+        )
+      : await reserveRoomSlot({
+          roomId,
+          date: normalizedBookingDate,
+          bookingId: reservationBookingId,
+          customerId: req.user._id,
+          timeSlot,
+          expiresAt: holdExpiresAt,
+        });
+    if (!hasReservation) {
+      if (useTransaction && session) {
+        await session.abortTransaction();
+        session.endSession();
+      }
+      return next(new AppError('This time slot has just been booked. Please select another available slot.', 409));
+    }
+
     const createdBookings = await Booking.create([{
+      _id: reservationBookingId,
       user: req.user._id,
       theater: theaterId,
       theaterName: theater.name,
@@ -326,9 +488,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       await session.abortTransaction();
       session.endSession();
     }
-    if (error?.code === 11000) {
-      return next(new AppError('This time slot has just been booked. Please select another available slot.', 409));
-    }
+    await releaseRoomSlotReservation({ _id: reservationBookingId, room: roomId, date: normalizedBookingDate });
     throw error;
   }
 
@@ -458,6 +618,7 @@ exports.cancelBooking = catchAsync(async (req, res, next) => {
   }
 
   await booking.save();
+  await releaseRoomSlotReservation(booking);
 
   try {
     await sendEmail({
@@ -498,7 +659,10 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
     date: bookingDate,
   });
 
-  const bookedBookings = await Booking.find(filter).select('timeSlot status payment duration expiresAt');
+  const [bookedBookings, activeReservations] = await Promise.all([
+    Booking.find(filter).select('timeSlot status payment duration expiresAt'),
+    getActiveRoomSlotReservations(roomId, bookingDate),
+  ]);
 
   const configuredSlots = (room.slots || [])
     .filter((slot) => slot.isActive !== false)
@@ -507,8 +671,13 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
   const slots = configuredSlots.map((s) => {
     const slotStr = `${s.startTime} - ${s.endTime}`;
     const conflicting = bookedBookings.find((b) => doesOverlap(b.timeSlot, slotStr));
+    const conflictingReservation = activeReservations.find((reservation) => {
+      const interval = getSlotInterval(slotStr);
+      return interval && reservation.startMinute < interval.end && reservation.endMinute > interval.start;
+    });
+    const reserved = Boolean(conflictingReservation);
     const isPast = isPastDate || isSlotInPast(bookingDateStr, s.startTime);
-    const available = !conflicting && !isPast;
+    const available = !conflicting && !reserved && !isPast;
 
     const interval = getSlotInterval(slotStr);
     const durationHours = interval ? Math.round((interval.end - interval.start) / 60) : 2;
@@ -520,11 +689,12 @@ exports.checkAvailability = catchAsync(async (req, res, next) => {
     if (isPast) {
       reason = isPastDate ? 'Past date' : 'Time slot has passed';
       slotState = 'past';
-    } else if (!available && conflicting) {
-      if (conflicting.status === 'confirmed' || conflicting.payment?.status === 'paid') {
+    } else if (!available && (conflicting || reserved)) {
+      if (conflicting?.status === 'confirmed' || conflicting?.payment?.status === 'paid' ||
+          conflictingReservation?.status === 'confirmed') {
         reason = 'Sold Out';
         slotState = 'sold_out';
-      } else if (conflicting.status === 'pending_verification' || conflicting.payment?.status === 'submitted') {
+      } else if (conflicting?.status === 'pending_verification' || conflicting?.payment?.status === 'submitted') {
         reason = 'Payment submitted & under verification';
         slotState = 'held';
         isTemporarilyHeld = true;
@@ -577,6 +747,19 @@ exports.rescheduleBooking = catchAsync(async (req, res, next) => {
 
   const bookingDate = normalizeBookingDate(date);
   if (!bookingDate) return next(new AppError('A valid date is required (YYYY-MM-DD)', 400));
+  const room = await Room.findById(booking.room);
+  const requestedInterval = getSlotInterval(timeSlot);
+  const selectedSlot = room?.slots.find((slot) => {
+    const interval = getSlotInterval(`${slot.startTime} - ${slot.endTime}`);
+    return interval && requestedInterval && interval.start === requestedInterval.start && interval.end === requestedInterval.end;
+  });
+  if (!selectedSlot || selectedSlot.isActive === false) {
+    return next(new AppError('Selected time slot is not configured for this room.', 400));
+  }
+  const canonicalTimeSlot = `${selectedSlot.startTime} - ${selectedSlot.endTime}`;
+  const previousDate = booking.date;
+  const previousTimeSlot = booking.timeSlot;
+  const previousHoldExpiry = booking.holdExpiresAt || booking.expiresAt || new Date(Date.now() + 10 * 60 * 1000);
 
   const filter = getActiveBookingsFilter({
     _id: { $ne: booking._id },
@@ -587,13 +770,58 @@ exports.rescheduleBooking = catchAsync(async (req, res, next) => {
 
   const activeBookings = await Booking.find(filter);
 
-  const conflict = activeBookings.some((b) => doesOverlap(b.timeSlot, timeSlot));
+  const conflict = activeBookings.some((b) => doesOverlap(b.timeSlot, canonicalTimeSlot));
 
   if (conflict) return next(new AppError('Selected slot is not available due to overlap.', 409));
 
-  booking.date = bookingDate;
-  booking.timeSlot = timeSlot;
-  await booking.save();
+  const reserved = await reserveRoomSlot({
+    roomId: booking.room,
+    date: bookingDate,
+    bookingId: booking._id,
+    customerId: booking.user,
+    timeSlot: canonicalTimeSlot,
+    expiresAt: previousHoldExpiry,
+  });
+  if (!reserved) return next(new AppError('Selected slot is not available due to overlap.', 409));
+
+  let bookingSaved = false;
+  try {
+    booking.date = bookingDate;
+    booking.timeSlot = canonicalTimeSlot;
+    booking.timeSlotId = selectedSlot._id;
+    booking.startTime = selectedSlot.startTime;
+    booking.endTime = selectedSlot.endTime;
+    await booking.save();
+    bookingSaved = true;
+    if (booking.status === 'confirmed') {
+      await confirmRoomSlotReservation(booking);
+    }
+    if (previousDate.getTime() !== bookingDate.getTime()) {
+      await releaseRoomSlotReservation({
+        _id: booking._id,
+        room: booking.room,
+        date: previousDate,
+      });
+    }
+  } catch (error) {
+    if (!bookingSaved) {
+      await releaseRoomSlotReservation({ _id: booking._id, room: booking.room, date: bookingDate });
+      const restored = await reserveRoomSlot({
+        roomId: booking.room,
+        date: previousDate,
+        bookingId: booking._id,
+        customerId: booking.user,
+        timeSlot: previousTimeSlot,
+        expiresAt: previousHoldExpiry,
+      });
+      if (restored && booking.status === 'confirmed') await confirmRoomSlotReservation({
+        _id: booking._id,
+        room: booking.room,
+        date: previousDate,
+      });
+    }
+    throw error;
+  }
 
   res.json({ success: true, message: 'Booking rescheduled successfully', data: booking });
 });
@@ -723,18 +951,36 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
     }
 
     const normalizedBookingDate = normalizeBookingDate(date);
-    const today = normalizeBookingDate(new Date());
-    if (!normalizedBookingDate || normalizedBookingDate < today) {
+    const requestedDate = formatDateToYMD(date);
+    if (!normalizedBookingDate || requestedDate < getKolkataDateString()) {
       return next(new AppError(`Slot #${idx + 1} booking date must be today or a future date.`, 400));
     }
 
     // Check configured slots
-    const configuredSlots = (room.slots || []).filter((s) => s.isActive !== false).map(
-      (s) => `${s.startTime} - ${s.endTime}`
-    );
-    if (!configuredSlots.includes(timeSlot)) {
+    const requestedInterval = getSlotInterval(timeSlot);
+    const selectedSlot = timeSlotId
+      ? room.slots.id(timeSlotId)
+      : (room.slots || []).find((slot) => {
+          const interval = getSlotInterval(`${slot.startTime} - ${slot.endTime}`);
+          return interval && requestedInterval && interval.start === requestedInterval.start && interval.end === requestedInterval.end;
+        });
+    const configuredInterval = selectedSlot && getSlotInterval(`${selectedSlot.startTime} - ${selectedSlot.endTime}`);
+    if (
+      !selectedSlot ||
+      selectedSlot.isActive === false ||
+      !requestedInterval ||
+      !configuredInterval ||
+      requestedInterval.start !== configuredInterval.start ||
+      requestedInterval.end !== configuredInterval.end
+    ) {
       return next(new AppError(`Time slot "${timeSlot}" in Slot #${idx + 1} is not available for room ${room.name}.`, 400));
     }
+    const canonicalTimeSlot = `${selectedSlot.startTime} - ${selectedSlot.endTime}`;
+    const slotDuration = Math.round((configuredInterval.end - configuredInterval.start) / 60);
+    if (![1, 2, 3].includes(slotDuration) || (item.duration && Number(item.duration) !== slotDuration)) {
+      return next(new AppError(`Duration for Slot #${idx + 1} does not match the selected room slot.`, 400));
+    }
+    item.duration = slotDuration;
 
     // Check existing active bookings in database for overlaps
     const activeFilter = getActiveBookingsFilter({
@@ -742,7 +988,7 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
       date: normalizedBookingDate,
     });
     const activeBookings = await Booking.find(activeFilter);
-    const isConflict = activeBookings.some((b) => doesOverlap(b.timeSlot, timeSlot));
+    const isConflict = activeBookings.some((b) => doesOverlap(b.timeSlot, canonicalTimeSlot));
     if (isConflict) {
       return next(
         new AppError(
@@ -750,6 +996,15 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
           409
         )
       );
+    }
+    const conflictsWithPreparedItem = preparedItems.some(
+      (prepared) =>
+        prepared.room._id.toString() === room._id.toString() &&
+        prepared.normalizedBookingDate.getTime() === normalizedBookingDate.getTime() &&
+        doesOverlap(prepared.timeSlot, canonicalTimeSlot)
+    );
+    if (conflictsWithPreparedItem) {
+      return next(new AppError(`Slot #${idx + 1} overlaps another selected bulk-booking slot.`, 409));
     }
 
     // Resolve event type
@@ -824,7 +1079,7 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
       theaterPrice = room.price2Hours || room.weekdayPrice || room.price1Hour || 1299;
     }
 
-    const [startTime, endTime] = timeSlot.split('-').map((s) => s.trim());
+    const [startTime, endTime] = canonicalTimeSlot.split('-').map((s) => s.trim());
     const subtotal = theaterPrice + cakePrice + addOnsTotal;
     const tax = 0;
     let discount = 0;
@@ -832,7 +1087,7 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
     const total = subtotal + tax - discount;
     const configuredAdvance = await settingService.getAdvancePaymentAmount();
     const advanceAmount = Math.min(configuredAdvance, total);
-    const balanceAmount = Math.max(0, total - advanceAmount);
+    const balanceAmount = total;
 
     combinedTotal += total;
     combinedAdvance += advanceAmount;
@@ -843,7 +1098,7 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
       locationDoc,
       eventTypeDoc,
       normalizedBookingDate,
-      timeSlot,
+      timeSlot: canonicalTimeSlot,
       timeSlotId: timeSlotId || undefined,
       startTime,
       endTime,
@@ -858,6 +1113,7 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
 
   // 3. Atomically create all child booking entries
   let createdBookings = [];
+  let docsToCreate = [];
   let session = null;
   let useTransaction = false;
 
@@ -875,10 +1131,11 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
   }
 
   try {
-    const docsToCreate = preparedItems.map((p, i) => {
+    docsToCreate = preparedItems.map((p, i) => {
       const bDateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const uniqueSuffix = `${Date.now().toString().slice(-4)}${i + 1}`;
       return {
+        _id: new mongoose.Types.ObjectId(),
         bookingId: `CS-${bDateStr}-${uniqueSuffix}`,
         user: req.user._id,
         theater: p.theater._id,
@@ -922,6 +1179,20 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
       };
     });
 
+    for (const bookingDoc of docsToCreate) {
+      const reserved = await reserveRoomSlot({
+        roomId: bookingDoc.room,
+        date: bookingDoc.date,
+        bookingId: bookingDoc._id,
+        customerId: req.user._id,
+        timeSlot: bookingDoc.timeSlot,
+        expiresAt: holdExpiresAt,
+      });
+      if (!reserved) {
+        throw new AppError('One of the selected time slots has just been booked. Please pick another available slot.', 409);
+      }
+    }
+
     createdBookings = await Booking.create(docsToCreate, useTransaction && session ? { session } : {});
 
     const updateOptions = useTransaction && session ? { session } : {};
@@ -937,9 +1208,7 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
       await session.abortTransaction();
       session.endSession();
     }
-    if (error?.code === 11000) {
-      return next(new AppError('One of the selected time slots has just been booked. Please pick another available slot.', 409));
-    }
+    await Promise.all(docsToCreate.map((bookingDoc) => releaseRoomSlotReservation(bookingDoc)));
     return next(error);
   }
 
@@ -958,7 +1227,7 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
       combinedPricing: {
         total: combinedTotal,
         advanceAmount: combinedAdvance,
-        balanceAmount: Math.max(0, combinedTotal - combinedAdvance),
+        balanceAmount: combinedTotal,
       },
       holdExpiresAt,
       expiresAt: holdExpiresAt,

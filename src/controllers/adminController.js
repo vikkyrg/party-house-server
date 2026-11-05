@@ -27,6 +27,10 @@ const {
   paymentRecordsSummaryUpdate,
   roundMoney,
 } = require('../services/bookingPaymentService');
+const {
+  releaseRoomSlotReservation,
+  confirmRoomSlotReservation,
+} = require('../services/roomSlotReservationService');
 
 const {
   doesOverlap,
@@ -390,14 +394,14 @@ exports.getAllBookings = catchAsync(async (req, res) => {
     if (dateFrom && dateFrom !== 'undefined' && dateFrom !== 'null') {
       const parsedFrom = new Date(dateFrom);
       if (!isNaN(parsedFrom.getTime())) {
-        parsedFrom.setHours(0, 0, 0, 0);
+        parsedFrom.setUTCHours(0, 0, 0, 0);
         dateQuery.$gte = parsedFrom;
       }
     }
     if (dateTo && dateTo !== 'undefined' && dateTo !== 'null') {
       const parsedTo = new Date(dateTo);
       if (!isNaN(parsedTo.getTime())) {
-        parsedTo.setHours(23, 59, 59, 999);
+        parsedTo.setUTCHours(23, 59, 59, 999);
         dateQuery.$lte = parsedTo;
       }
     }
@@ -639,6 +643,9 @@ const updatePaymentRecord = async (booking, req, res, next) => {
       409
     ));
   }
+  if (updatedBooking.status === 'confirmed') {
+    await confirmRoomSlotReservation(updatedBooking);
+  }
 
   await createAuditLog({
     user: req.user._id,
@@ -822,8 +829,14 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
   if (req.body.paymentStatus && !['confirmed'].includes(status) && req.body.action !== 'reject') {
     booking.payment.status = req.body.paymentStatus;
     if (req.body.paymentStatus === 'paid') {
-      booking.payment.amountPaid = booking.payment.amountPaid || booking.pricing?.advanceAmount || booking.pricing?.total || 750;
-      if (booking.pricing) booking.pricing.balanceAmount = 0;
+      const total = Number(booking.pricing?.total || 0);
+      booking.payment.amountPaid = roundMoney(
+        Math.min(total, Number(booking.payment.amountPaid || booking.pricing?.advanceAmount || total))
+      );
+      booking.payment.status = booking.payment.amountPaid >= total ? 'fully_paid' : 'partially_paid';
+      if (booking.pricing) {
+        booking.pricing.balanceAmount = roundMoney(Math.max(0, total - booking.payment.amountPaid));
+      }
       booking.payment.paidAt = booking.payment.paidAt || new Date();
       booking.payment.verifiedAt = booking.payment.verifiedAt || new Date();
       booking.payment.verifiedBy = req.user._id;
@@ -833,6 +846,11 @@ exports.updateBookingStatus = catchAsync(async (req, res, next) => {
   }
 
   await booking.save();
+  if (booking.status === 'confirmed') {
+    await confirmRoomSlotReservation(booking);
+  } else if (booking.status === 'cancelled') {
+    await releaseRoomSlotReservation(booking);
+  }
 
   await createAuditLog({
     user: req.user._id,

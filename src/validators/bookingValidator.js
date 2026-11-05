@@ -49,6 +49,17 @@ exports.createBookingSchema = Joi.object({
     specialRequests: Joi.string().max(500).allow('', null),
   }).required(),
   discountCode: Joi.string(),
+  slotHoldId: Joi.string().hex().length(24).optional(),
+});
+
+exports.createBookingHoldSchema = Joi.object({
+  theaterId: Joi.string().hex().length(24).required(),
+  roomId: Joi.string().hex().length(24).required(),
+  date: Joi.date().iso().required(),
+  timeSlot: Joi.string().required(),
+  timeSlotId: Joi.string().hex().length(24).optional(),
+  duration: Joi.number().integer().valid(1, 2, 3).required(),
+  holdId: Joi.string().hex().length(24).optional(),
 });
 
 exports.bulkBookingSchema = Joi.object({

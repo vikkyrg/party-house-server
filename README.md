@@ -7,7 +7,7 @@ Production-ready backend API for CS Cinemas private theater booking platform.
 - JWT authentication with refresh tokens, OTP verification, and account lockout
 - Role-based access control (customer, admin, super-admin)
 - Theater, city, location, event type, and add-on management
-- Booking lifecycle with availability checks and Razorpay payments
+- Booking lifecycle with atomic 10-minute slot holds and static UPI QR payment verification
 - Reviews, banners, testimonials, and FAQ content management
 - Admin dashboard, revenue reports, audit logs, and CSV export
 - Security middleware (Helmet, rate limiting, XSS, NoSQL injection protection)
@@ -22,7 +22,7 @@ Production-ready backend API for CS Cinemas private theater booking platform.
 - Express 4
 - MongoDB + Mongoose 8
 - Joi validation
-- Razorpay, Cloudinary, Nodemailer, Twilio
+- Cloudinary, Nodemailer, Twilio
 
 ## Quick Start
 
@@ -53,8 +53,8 @@ http://localhost:5000/api/v1
 |--------|-----------|
 | Auth | `/auth/register`, `/auth/login`, `/auth/verify-otp`, `/auth/me` |
 | Theaters | `/theaters`, `/theaters/:id/availability` |
-| Bookings | `/bookings`, `/bookings/check-availability` |
-| Payment | `/payment/create-order`, `/payment/verify` |
+| Bookings | `/bookings/check-availability`, `/bookings/hold`, `/bookings` |
+| Payment | `/payment/submit-upi`, `/payment/status/:bookingId` |
 | Admin | `/admin/dashboard/stats`, `/admin/bookings` |
 
 See `postman_collection.json` for the full API collection.
@@ -72,7 +72,6 @@ MONGODB_URI=mongodb://localhost:27017/cs_cinemas
 MONGODB_URI_TEST=mongodb://localhost:27017/cs_cinemas_test
 
 - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` - Min 32 characters each
-- `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` - Payment gateway
 - `CLOUDINARY_*` - Image uploads
 - `SMTP_*` - Email delivery
 - `TWILIO_*` - SMS (set `SMS_ENABLED=true` in production)
@@ -109,7 +108,7 @@ npm test
 
 ```
 src/
-├── config/       # Database, Cloudinary, Razorpay, email, SMS
+├── config/       # Database, Cloudinary, email, SMS
 ├── models/       # Mongoose schemas
 ├── controllers/  # Route handlers
 ├── routes/       # API routes
@@ -125,6 +124,10 @@ src/
 1. Set all production environment variables
 2. Enable HTTPS. This API does not enable cross-origin browser access.
 3. Use PM2 or similar process manager:
+
+The server initializes the room/day reservation index and removes the obsolete
+unique room/date/time-slot booking index during startup. This is an index-only
+migration; it does not delete or rewrite booking records.
 
 ```bash
 npm ci --only=production

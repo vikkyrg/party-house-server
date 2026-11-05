@@ -1,6 +1,10 @@
 const Booking = require('../models/Booking');
 const logger = require('../utils/logger');
 const { BOOKING_HOLD_DURATION_MS } = require('../utils/dateUtils');
+const {
+  cleanupExpiredRoomSlotReservations,
+  releaseRoomSlotReservation,
+} = require('./roomSlotReservationService');
 
 /**
  * Release unconfirmed bookings after their 10-minute hold expires, including submitted
@@ -11,16 +15,17 @@ const cleanupExpiredBookings = async () => {
     const now = new Date();
     const tenMinutesAgo = new Date(now.getTime() - BOOKING_HOLD_DURATION_MS);
 
-    const result = await Booking.updateMany(
-      {
+    const expiredFilter = {
         status: { $in: ['pending', 'pending_payment', 'pending_verification'] },
-        'payment.status': { $in: ['pending', 'failed', 'submitted', 'pending_verification'] },
         $or: [
           { holdExpiresAt: { $exists: true, $ne: null, $lte: now } },
           { expiresAt: { $exists: true, $ne: null, $lte: now } },
           { createdAt: { $lte: tenMinutesAgo } },
         ],
-      },
+      };
+    const expiredBookings = await Booking.find(expiredFilter).select('_id room date');
+    const result = await Booking.updateMany(
+      expiredFilter,
       {
         $set: {
           status: 'cancelled',
@@ -30,6 +35,8 @@ const cleanupExpiredBookings = async () => {
       }
     );
 
+    await Promise.all(expiredBookings.map((booking) => releaseRoomSlotReservation(booking)));
+    await cleanupExpiredRoomSlotReservations(now);
     if (result.modifiedCount > 0) {
       logger.info(`Expired booking cleanup: Released ${result.modifiedCount} abandoned slot(s).`);
     }

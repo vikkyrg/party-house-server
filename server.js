@@ -4,11 +4,13 @@ const { connectDB } = require('./src/config/database');
 const logger = require('./src/utils/logger');
 
 const { startBookingExpiryCron } = require('./src/services/bookingExpiryService');
+const { migrateLegacyBookingIndex } = require('./src/services/roomSlotReservationService');
 
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   await connectDB();
+  await migrateLegacyBookingIndex();
   startBookingExpiryCron();
 
   app.listen(PORT, () => {
