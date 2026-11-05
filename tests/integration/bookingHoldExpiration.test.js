@@ -179,6 +179,71 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     expect(bookingRes.body.data.duration).toBe(1);
   });
 
+  it('creates an anonymous hold before guest details and binds it when booking is submitted', async () => {
+    const holdId = new mongoose.Types.ObjectId().toString();
+    const holdRes = await request(app)
+      .post('/api/v1/bookings/hold')
+      .send({
+        theaterId: theater._id,
+        roomId: room._id,
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        timeSlotId: room.slots[0]._id,
+        duration: 1,
+        holdId,
+      })
+      .expect(201);
+
+    expect(holdRes.body.data.holdId).toBe(holdId);
+    let reservationDay = await RoomSlotReservation.findOne({ room: room._id });
+    expect(reservationDay.reservations[0].customer).toBeUndefined();
+
+    const bookingRes = await request(app)
+      .post('/api/v1/bookings')
+      .send({
+        ...validBookingPayload,
+        theaterId: theater._id,
+        roomId: room._id,
+        eventTypeId: eventType._id,
+        slotHoldId: holdId,
+        timeSlotId: room.slots[0]._id,
+      })
+      .expect(201);
+
+    expect(bookingRes.body.data._id).toBe(holdId);
+    reservationDay = await RoomSlotReservation.findOne({ room: room._id });
+    expect(reservationDay.reservations[0].customer.toString()).toBe(
+      bookingRes.body.data.user.toString()
+    );
+  });
+
+  it('returns 404 for a room that is not present in the selected theater', async () => {
+    await request(app)
+      .post('/api/v1/bookings/hold')
+      .send({
+        theaterId: theater._id,
+        roomId: new mongoose.Types.ObjectId(),
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        duration: 1,
+      })
+      .expect(404);
+  });
+
+  it('returns 404 for a slot ID that is not part of the selected room', async () => {
+    await request(app)
+      .post('/api/v1/bookings/hold')
+      .send({
+        theaterId: theater._id,
+        roomId: room._id,
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        timeSlotId: new mongoose.Types.ObjectId(),
+        duration: 1,
+      })
+      .expect(404);
+  });
+
   it('releases an expired abandoned hold and allows the slot to be reserved again', async () => {
     const holdId = new mongoose.Types.ObjectId().toString();
     await request(app)

@@ -39,7 +39,7 @@ const reserveRoomSlot = async ({
   }
 
   const reservationBookingId = new mongoose.Types.ObjectId(bookingId);
-  const reservationCustomerId = new mongoose.Types.ObjectId(customerId);
+  const reservationCustomerId = customerId ? new mongoose.Types.ObjectId(customerId) : null;
   const now = new Date();
   const filter = {
     room: roomId,
@@ -49,13 +49,13 @@ const reserveRoomSlot = async ({
   filter.reservations.$not.$elemMatch.booking = { $ne: reservationBookingId };
   const reservation = {
     booking: reservationBookingId,
-    customer: reservationCustomerId,
     startMinute: interval.start,
     endMinute: interval.end,
     timeSlot,
     status: 'pending',
     expiresAt,
   };
+  if (reservationCustomerId) reservation.customer = reservationCustomerId;
   const update = [
     {
       $set: {
@@ -101,14 +101,15 @@ const getOwnedActiveRoomSlotReservation = async ({
   timeSlot,
 }) => {
   const interval = getSlotInterval(timeSlot);
-  if (!interval) return false;
+  if (!interval || !mongoose.isValidObjectId(bookingId)) return null;
   const reservationDay = await RoomSlotReservation.findOne({ room: roomId, date }).lean();
   const now = new Date();
   return (
     reservationDay?.reservations.find(
       (reservation) =>
         reservation.booking.toString() === bookingId.toString() &&
-        reservation.customer.toString() === customerId.toString() &&
+        (!reservation.customer ||
+          (customerId && reservation.customer.toString() === customerId.toString())) &&
         reservation.status === 'pending' &&
         reservation.expiresAt > now &&
         reservation.startMinute === interval.start &&

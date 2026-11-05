@@ -48,8 +48,9 @@ exports.createBookingHold = catchAsync(async (req, res, next) => {
   }
 
   const room = await Room.findOne({ _id: roomId, theater: theaterId, isActive: true });
-  const theater = room ? await Theater.findOne({ _id: theaterId, isActive: true }) : null;
-  if (!room || !theater) return next(new AppError('Room or theater not found or inactive.', 404));
+  if (!room) return next(new AppError('The selected room was not found or is inactive for this theater.', 404));
+  const theater = await Theater.findOne({ _id: theaterId, isActive: true });
+  if (!theater) return next(new AppError('The selected theater was not found or is inactive.', 404));
 
   const requestedInterval = getSlotInterval(timeSlot);
   const selectedSlot = timeSlotId
@@ -58,6 +59,12 @@ exports.createBookingHold = catchAsync(async (req, res, next) => {
         const interval = getSlotInterval(`${slot.startTime} - ${slot.endTime}`);
         return interval && requestedInterval && interval.start === requestedInterval.start && interval.end === requestedInterval.end;
       });
+  if (timeSlotId && !selectedSlot) {
+    return next(new AppError('The selected time slot was not found in this room. Refresh availability and choose a slot again.', 404));
+  }
+  if (!selectedSlot) {
+    return next(new AppError('The selected time slot was not found in this room.', 404));
+  }
   const canonicalTimeSlot = selectedSlot && `${selectedSlot.startTime} - ${selectedSlot.endTime}`;
   const interval = canonicalTimeSlot && getSlotInterval(canonicalTimeSlot);
   if (
@@ -79,14 +86,16 @@ exports.createBookingHold = catchAsync(async (req, res, next) => {
     return next(new AppError('This time slot has already started or passed.', 400));
   }
 
-  const existingBooking = await Booking.findOne({
-    ...getActiveBookingsFilter({
-      room: roomId,
-      date: normalizedDate,
-      user: req.user._id,
-    }),
-    timeSlot: canonicalTimeSlot,
-  });
+  const existingBooking = req.user?._id
+    ? await Booking.findOne({
+        ...getActiveBookingsFilter({
+          room: roomId,
+          date: normalizedDate,
+          user: req.user._id,
+        }),
+        timeSlot: canonicalTimeSlot,
+      })
+    : null;
   if (existingBooking) {
     return res.json({
       success: true,
@@ -116,7 +125,7 @@ exports.createBookingHold = catchAsync(async (req, res, next) => {
     roomId,
     date: normalizedDate,
     bookingId: holdId,
-    customerId: req.user._id,
+    customerId: req.user?._id,
     timeSlot: canonicalTimeSlot,
     expiresAt: holdExpiresAt,
   });
