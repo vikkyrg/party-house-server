@@ -55,6 +55,9 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
   if (!bookingId || !rawReference || typeof rawReference !== 'string' || !rawReference.trim()) {
     return next(new AppError('Booking ID, payment amount, and UPI transaction reference are required', 400));
   }
+  if (!mongoose.isValidObjectId(bookingId)) {
+    return next(new AppError('A valid booking ID is required.', 400));
+  }
   if (!Number.isFinite(submittedAmount) || submittedAmount < 1 || Math.round(submittedAmount * 100) !== submittedAmount * 100) {
     return next(new AppError('Payment amount must be at least ₹1 and use no more than two decimal places.', 400));
   }
@@ -72,7 +75,11 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
 
   // Authorization check: must be owner or admin
   const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
-  if (!req.user || (!isAdmin && booking.user.toString() !== req.user._id.toString())) {
+  if (
+    !req.user ||
+    (!isAdmin &&
+      (!booking.user || booking.user.toString() !== req.user._id.toString()))
+  ) {
     return next(new AppError('Not authorized to update this booking', 403));
   }
 
@@ -238,11 +245,20 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
  * Check payment and booking verification status (used by customer modal poller)
  */
 exports.checkPaymentStatus = catchAsync(async (req, res, next) => {
-  const booking = await Booking.findById(req.params.bookingId);
+  const { bookingId } = req.params;
+  if (!mongoose.isValidObjectId(bookingId)) {
+    return next(new AppError('A valid booking ID is required.', 400));
+  }
+
+  const booking = await Booking.findById(bookingId);
   if (!booking) return next(new AppError('Booking not found', 404));
 
   const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
-  if (!req.user || (!isAdmin && booking.user.toString() !== req.user._id.toString())) {
+  if (
+    !req.user ||
+    (!isAdmin &&
+      (!booking.user || booking.user.toString() !== req.user._id.toString()))
+  ) {
     return next(new AppError('Not authorized', 403));
   }
 

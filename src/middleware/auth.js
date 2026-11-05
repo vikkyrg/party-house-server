@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const mongoose = require('mongoose');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const tokenService = require('../services/tokenService');
@@ -137,12 +138,14 @@ exports.resolveCustomerAuth = catchAsync(async (req, res, next) => {
   // If bookingId provided on payment/status routes
   if (req.params?.bookingId || req.body?.bookingId) {
     const bookingId = req.params?.bookingId || req.body?.bookingId;
-    const booking = await require('../models/Booking').findById(bookingId);
-    if (booking && booking.user) {
-      const bookingUser = await User.findById(booking.user);
-      if (bookingUser) {
-        req.user = bookingUser;
-        return next();
+    if (mongoose.isValidObjectId(bookingId)) {
+      const booking = await require('../models/Booking').findById(bookingId);
+      if (booking && booking.user) {
+        const bookingUser = await User.findById(booking.user);
+        if (bookingUser) {
+          req.user = bookingUser;
+          return next();
+        }
       }
     }
   }

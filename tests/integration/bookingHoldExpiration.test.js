@@ -415,6 +415,15 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     expect(upiRes.body.data.status).toBe('pending_verification');
     expect(upiRes.body.data.paymentStatus).toBe('pending_verification');
 
+    const pendingStatusRes = await request(app)
+      .get(`/api/v1/payment/status/${bookingId}`)
+      .expect(200);
+    expect(pendingStatusRes.body.data.paymentSummary.verifiedAmountPaid).toBe(0);
+    expect(pendingStatusRes.body.data.paymentSummary.pendingVerificationAmount).toBe(
+      createRes.body.data.pricing.total
+    );
+    expect(pendingStatusRes.body.data.paymentStatus).toBe('pending_verification');
+
     // Admin verifies advance payment
     const adminVerifyRes = await request(app)
       .put(`/api/v1/admin/bookings/${bookingId}/status`)
@@ -429,6 +438,14 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     expect(adminVerifyRes.body.data.payment.status).toBe('fully_paid');
     expect(adminVerifyRes.body.data.paymentSummary.verifiedAmountPaid).toBe(createRes.body.data.pricing.total);
 
+    const verifiedStatusRes = await request(app)
+      .get(`/api/v1/payment/status/${bookingId}`)
+      .expect(200);
+    expect(verifiedStatusRes.body.data.paymentSummary.verifiedAmountPaid).toBe(
+      createRes.body.data.pricing.total
+    );
+    expect(verifiedStatusRes.body.data.paymentSummary.remainingBalance).toBe(0);
+
     // Check availability now shows Sold Out
     const availRes = await request(app)
       .get('/api/v1/bookings/check-availability')
@@ -442,6 +459,15 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     expect(soldOutSlot.available).toBe(false);
     expect(soldOutSlot.slotState).toBe('sold_out');
     expect(soldOutSlot.reason).toBe('Sold Out');
+  });
+
+  it('returns a clear client error for an invalid payment status booking ID', async () => {
+    const res = await request(app)
+      .get('/api/v1/payment/status/not-an-object-id')
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/valid booking ID/i);
   });
 
   it('accepts multiple partial payments, verifies each once, and blocks overpayment after full payment', async () => {
