@@ -33,7 +33,7 @@ const {
 const { cleanupExpiredBookings } = require('../services/bookingExpiryService');
 
 exports.createBooking = catchAsync(async (req, res, next) => {
-  await cleanupExpiredBookings();
+  cleanupExpiredBookings().catch((err) => logger.error('Error during background booking cleanup:', err));
   const { theaterId, roomId, locationId, date, bookingDate, timeSlot, timeSlotId, eventTypeId, addOns, customerDetails, discountCode } =
     req.body;
 
@@ -338,17 +338,15 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     { path: 'addOns.addOn', select: 'name price category' },
   ]);
 
-  // Do not send SMS/Email until payment is complete (handled elsewhere), but left here to preserve existing flow
-  try {
-    await sendEmail({
-      to: customerDetails.email,
-      subject: `Booking Request Initiated - ${booking.bookingId}`,
-      template: 'booking-confirmation',
-      data: { booking, customerName: customerDetails.name },
-    });
-  } catch(err) {
-     logger.error('Failed to send email:', err);
-  }
+  // Asynchronously send notification email without blocking the HTTP response
+  sendEmail({
+    to: customerDetails.email,
+    subject: `Booking Request Initiated - ${booking.bookingId}`,
+    template: 'booking-confirmation',
+    data: { booking, customerName: customerDetails.name },
+  }).catch((err) => {
+    logger.error('Failed to send booking initiated email:', err);
+  });
 
   } catch (error) {
     if (useTransaction && session && session.inTransaction && session.inTransaction()) {
@@ -646,7 +644,7 @@ exports.downloadInvoice = catchAsync(async (req, res, next) => {
  * - Calculates individual + combined total & advance payable amounts.
  */
 exports.createBulkBooking = catchAsync(async (req, res, next) => {
-  await cleanupExpiredBookings();
+  cleanupExpiredBookings().catch((err) => logger.error('Error during background booking cleanup:', err));
   const { bookings: requestedBookings, customerDetails, discountCode } = req.body;
 
   if (!requestedBookings || !Array.isArray(requestedBookings) || requestedBookings.length === 0) {
