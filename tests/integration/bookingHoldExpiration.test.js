@@ -198,6 +198,19 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     let reservationDay = await RoomSlotReservation.findOne({ room: room._id });
     expect(reservationDay.reservations[0].customer).toBeUndefined();
 
+    await request(app)
+      .post('/api/v1/bookings/hold')
+      .send({
+        theaterId: theater._id,
+        roomId: room._id,
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        timeSlotId: room.slots[0]._id,
+        duration: 1,
+        holdId: new mongoose.Types.ObjectId().toString(),
+      })
+      .expect(409);
+
     const bookingRes = await request(app)
       .post('/api/v1/bookings')
       .send({
