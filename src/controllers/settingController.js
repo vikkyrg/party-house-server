@@ -3,6 +3,8 @@ const AppError = require('../utils/AppError');
 const settingService = require('../services/settingService');
 const Setting = require('../models/Setting');
 
+const DEFAULT_UPI_ID = 'shailajagovindraju-1@okhdfcbank';
+
 /**
  * Public endpoint: Get booking payment settings (e.g. advance payment amount)
  */
@@ -12,7 +14,7 @@ exports.getPublicPaymentSettings = catchAsync(async (req, res) => {
     success: true,
     data: {
       advancePaymentAmount: advanceAmount,
-      upiId: process.env.UPI_ID || '',
+      upiId: process.env.UPI_ID?.trim() || DEFAULT_UPI_ID,
     },
   });
 });
