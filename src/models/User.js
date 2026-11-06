@@ -44,7 +44,6 @@ const UserSchema = new mongoose.Schema(
     },
     isVerified: { type: Boolean, default: false },
     isBlocked: { type: Boolean, default: false },
-    bookingSessionId: { type: String, unique: true, sparse: true, select: false },
     profileImage: {
       url: String,
       publicId: String,

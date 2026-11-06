@@ -147,8 +147,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
 
   it('creates an atomic hold at slot selection and uses it for booking creation', async () => {
     const holdId = new mongoose.Types.ObjectId().toString();
-    const customerAgent = request.agent(app);
-    const holdRes = await customerAgent
+    const holdRes = await request(app)
       .post('/api/v1/bookings/hold')
       .set('Authorization', `Bearer ${customerToken}`)
       .send({
@@ -162,7 +161,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
       })
       .expect(201);
 
-    const bookingRes = await customerAgent
+    const bookingRes = await request(app)
       .post('/api/v1/bookings')
       .set('Authorization', `Bearer ${customerToken}`)
       .send({
@@ -182,8 +181,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
 
   it('creates an anonymous hold before guest details and binds it when booking is submitted', async () => {
     const holdId = new mongoose.Types.ObjectId().toString();
-    const guestAgent = request.agent(app);
-    const holdRes = await guestAgent
+    const holdRes = await request(app)
       .post('/api/v1/bookings/hold')
       .send({
         theaterId: theater._id,
@@ -200,7 +198,7 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     let reservationDay = await RoomSlotReservation.findOne({ room: room._id });
     expect(reservationDay.reservations[0].customer).toBeUndefined();
 
-    const bookingRes = await guestAgent
+    const bookingRes = await request(app)
       .post('/api/v1/bookings')
       .send({
         ...validBookingPayload,
@@ -217,70 +215,6 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     expect(reservationDay.reservations[0].customer.toString()).toBe(
       bookingRes.body.data.user.toString()
     );
-    expect(bookingRes.body.data.user.toString()).not.toBe(customerUser._id.toString());
-  });
-
-  it('binds a hold and payment status to the creating browser session', async () => {
-    const holdId = new mongoose.Types.ObjectId().toString();
-    const draftId = require('crypto').randomBytes(16).toString('hex');
-    const guestAgentA = request.agent(app);
-    const guestAgentB = request.agent(app);
-
-    await guestAgentA
-      .post('/api/v1/bookings/hold')
-      .send({
-        theaterId: theater._id,
-        roomId: room._id,
-        date: futureBookingDate,
-        timeSlot: validBookingPayload.timeSlot,
-        timeSlotId: room.slots[0]._id,
-        duration: 1,
-        holdId,
-      })
-      .expect(201);
-
-    const draftPayload = {
-      selection: {
-        theaterId: theater._id.toString(),
-        roomId: room._id.toString(),
-        date: futureBookingDate,
-        timeSlot: validBookingPayload.timeSlot,
-        timeSlotId: room.slots[0]._id.toString(),
-        duration: 1,
-      },
-      currentStep: 2,
-      customerDetails: validBookingPayload.customerDetails,
-      selectedEventType: eventType._id.toString(),
-      selectedCake: null,
-      selectedAddons: {},
-      termsAccepted: false,
-    };
-
-    await guestAgentA.put(`/api/v1/bookings/drafts/${draftId}`).send(draftPayload).expect(200);
-    const restoredDraft = await guestAgentA.get(`/api/v1/bookings/drafts/${draftId}`).expect(200);
-    expect(restoredDraft.body.data.customerDetails.email).toBe(validBookingPayload.customerDetails.email);
-    await guestAgentB.get(`/api/v1/bookings/drafts/${draftId}`).expect(409);
-    await guestAgentB.put(`/api/v1/bookings/drafts/${draftId}`).send(draftPayload).expect(409);
-
-    const bookingPayload = {
-      ...validBookingPayload,
-      theaterId: theater._id,
-      roomId: room._id,
-      eventTypeId: eventType._id,
-      slotHoldId: holdId,
-      timeSlotId: room.slots[0]._id,
-    };
-
-    await guestAgentB.post('/api/v1/bookings').send(bookingPayload).expect(409);
-
-    const booking = await guestAgentA.post('/api/v1/bookings').send(bookingPayload).expect(201);
-    expect(booking.body.data.bookingSessionId).toBeUndefined();
-    const restoredBooking = await guestAgentA.get('/api/v1/bookings/current-session').expect(200);
-    expect(restoredBooking.body.data._id).toBe(booking.body.data._id);
-    const customerBSession = await guestAgentB.get('/api/v1/bookings/current-session').expect(200);
-    expect(customerBSession.body.data).toBeNull();
-    await guestAgentA.get(`/api/v1/payment/status/${booking.body.data._id}`).expect(200);
-    await guestAgentB.get(`/api/v1/payment/status/${booking.body.data._id}`).expect(403);
   });
 
   it('returns 404 for a room that is not present in the selected theater', async () => {
@@ -483,7 +417,6 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
 
     const pendingStatusRes = await request(app)
       .get(`/api/v1/payment/status/${bookingId}`)
-      .set('Authorization', `Bearer ${customerToken}`)
       .expect(200);
     expect(pendingStatusRes.body.data.paymentSummary.verifiedAmountPaid).toBe(0);
     expect(pendingStatusRes.body.data.paymentSummary.pendingVerificationAmount).toBe(
@@ -507,7 +440,6 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
 
     const verifiedStatusRes = await request(app)
       .get(`/api/v1/payment/status/${bookingId}`)
-      .set('Authorization', `Bearer ${customerToken}`)
       .expect(200);
     expect(verifiedStatusRes.body.data.paymentSummary.verifiedAmountPaid).toBe(
       createRes.body.data.pricing.total

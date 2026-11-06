@@ -1,8 +1,6 @@
 const { createBookingNotification } = require('../services/bookingNotificationService');
 const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
-const RoomSlotReservation = require('../models/RoomSlotReservation');
-const BookingDraft = require('../models/BookingDraft');
 const invoiceService = require('../services/invoiceService');
 const logger = require('../utils/logger');
 const Theater = require('../models/Theater');
@@ -128,7 +126,6 @@ exports.createBookingHold = catchAsync(async (req, res, next) => {
     date: normalizedDate,
     bookingId: holdId,
     customerId: req.user?._id,
-    bookingSessionId: req.bookingSessionId,
     timeSlot: canonicalTimeSlot,
     expiresAt: holdExpiresAt,
   });
@@ -147,30 +144,6 @@ exports.createBookingHold = catchAsync(async (req, res, next) => {
       duration: slotDuration,
     },
   });
-});
-
-exports.releaseBookingHold = catchAsync(async (req, res, next) => {
-  if (!mongoose.isValidObjectId(req.params.holdId)) {
-    return next(new AppError('A valid booking hold ID is required.', 400));
-  }
-
-  const existingBooking = await Booking.exists({ _id: req.params.holdId });
-  if (!existingBooking) {
-    await RoomSlotReservation.updateOne(
-      {
-        reservations: {
-          $elemMatch: {
-            booking: new mongoose.Types.ObjectId(req.params.holdId),
-            bookingSessionId: req.bookingSessionId,
-            status: 'pending',
-          },
-        },
-      },
-      { $set: { 'reservations.$.status': 'cancelled' } }
-    );
-  }
-
-  res.json({ success: true });
 });
 
 exports.createBooking = catchAsync(async (req, res, next) => {
@@ -439,7 +412,6 @@ exports.createBooking = catchAsync(async (req, res, next) => {
           date: normalizedBookingDate,
           bookingId: reservationBookingId,
           customerId: req.user._id,
-          bookingSessionId: req.bookingSessionId,
           timeSlot,
         })
       : null;
@@ -451,7 +423,6 @@ exports.createBooking = catchAsync(async (req, res, next) => {
               date: normalizedBookingDate,
               bookingId: reservationBookingId,
               customerId: req.user._id,
-              bookingSessionId: req.bookingSessionId,
               timeSlot,
               expiresAt: holdExpiresAt,
             }))
@@ -461,7 +432,6 @@ exports.createBooking = catchAsync(async (req, res, next) => {
           date: normalizedBookingDate,
           bookingId: reservationBookingId,
           customerId: req.user._id,
-          bookingSessionId: req.bookingSessionId,
           timeSlot,
           expiresAt: holdExpiresAt,
         });
@@ -476,8 +446,6 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     const createdBookings = await Booking.create([{
       _id: reservationBookingId,
       user: req.user._id,
-      bookingSessionId: req.bookingSessionId,
-      draftId: req.body.draftId,
       theater: theaterId,
       theaterName: theater.name,
       location: locationDoc ? locationDoc._id : undefined,
@@ -538,17 +506,6 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     { path: 'eventType', select: 'name' },
     { path: 'addOns.addOn', select: 'name price category' },
   ]);
-
-  if (req.body.draftId) {
-    try {
-      await BookingDraft.deleteOne({
-        draftId: req.body.draftId,
-        bookingSessionId: req.bookingSessionId,
-      });
-    } catch (error) {
-      logger.error('Failed to remove submitted booking draft:', error);
-    }
-  }
 
   // Asynchronously send notification email without blocking the HTTP response
   sendEmail({
@@ -614,90 +571,6 @@ exports.getMyBookings = catchAsync(async (req, res) => {
       ...booking.toObject(),
       paymentSummary: getPaymentSummary(booking),
     })),
-  });
-});
-
-exports.getBookingDraft = catchAsync(async (req, res) => {
-  const draft = await BookingDraft.findOne({
-    draftId: req.params.draftId,
-    bookingSessionId: req.bookingSessionId,
-    expiresAt: { $gt: new Date() },
-  }).select('-_id -bookingSessionId -user -__v');
-
-  if (!draft && (await BookingDraft.exists({ draftId: req.params.draftId }))) {
-    return res.status(409).json({
-      success: false,
-      message: 'This booking draft belongs to another customer session.',
-    });
-  }
-
-  res.json({ success: true, data: draft || null });
-});
-
-exports.saveBookingDraft = catchAsync(async (req, res, next) => {
-  try {
-    if (await Booking.exists({ draftId: req.params.draftId })) {
-      return next(new AppError('This booking draft has already been submitted.', 409));
-    }
-
-    const draft = await BookingDraft.findOneAndUpdate(
-      { draftId: req.params.draftId, bookingSessionId: req.bookingSessionId },
-      {
-        ...req.body,
-        draftId: req.params.draftId,
-        bookingSessionId: req.bookingSessionId,
-        user: req.isAuthenticated ? req.user._id : undefined,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-      },
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
-    ).select('-_id -bookingSessionId -user -__v');
-
-    if (await Booking.exists({ draftId: req.params.draftId })) {
-      await BookingDraft.deleteOne({
-        draftId: req.params.draftId,
-        bookingSessionId: req.bookingSessionId,
-      });
-      return next(new AppError('This booking draft has already been submitted.', 409));
-    }
-
-    res.json({
-      success: true,
-      data: { draftId: draft.draftId, expiresAt: draft.expiresAt },
-    });
-  } catch (error) {
-    if (error?.code === 11000) {
-      return next(new AppError('This booking draft belongs to another customer session.', 409));
-    }
-    throw error;
-  }
-});
-
-exports.deleteBookingDraft = catchAsync(async (req, res) => {
-  await BookingDraft.deleteOne({
-    draftId: req.params.draftId,
-    bookingSessionId: req.bookingSessionId,
-  });
-  res.json({ success: true });
-});
-
-exports.getCurrentSessionBooking = catchAsync(async (req, res) => {
-  const ownerFilter = req.isAuthenticated
-    ? { user: req.user._id }
-    : { bookingSessionId: req.bookingSessionId };
-  const booking = await Booking.findOne({
-    ...ownerFilter,
-    status: { $in: ['pending', 'pending_payment', 'pending_verification', 'confirmed'] },
-  })
-    .sort({ createdAt: -1 })
-    .populate('theater', 'name images')
-    .populate('eventType', 'name')
-    .populate('addOns.addOn', 'name price category');
-
-  res.json({
-    success: true,
-    data: booking
-      ? { ...booking.toObject(), paymentSummary: getPaymentSummary(booking) }
-      : null,
   });
 });
 
@@ -1274,7 +1147,6 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
         _id: new mongoose.Types.ObjectId(),
         bookingId: `CS-${bDateStr}-${uniqueSuffix}`,
         user: req.user._id,
-        bookingSessionId: req.bookingSessionId,
         theater: p.theater._id,
         theaterName: p.theater.name,
         location: p.locationDoc ? p.locationDoc._id : undefined,
@@ -1322,7 +1194,6 @@ exports.createBulkBooking = catchAsync(async (req, res, next) => {
         date: bookingDoc.date,
         bookingId: bookingDoc._id,
         customerId: req.user._id,
-        bookingSessionId: req.bookingSessionId,
         timeSlot: bookingDoc.timeSlot,
         expiresAt: holdExpiresAt,
       });

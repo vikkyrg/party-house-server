@@ -29,7 +29,6 @@ const reserveRoomSlot = async ({
   date,
   bookingId,
   customerId,
-  bookingSessionId,
   timeSlot,
   expiresAt,
 }) => {
@@ -57,7 +56,6 @@ const reserveRoomSlot = async ({
     expiresAt,
   };
   if (reservationCustomerId) reservation.customer = reservationCustomerId;
-  if (bookingSessionId) reservation.bookingSessionId = bookingSessionId;
   const update = [
     {
       $set: {
@@ -100,7 +98,6 @@ const getOwnedActiveRoomSlotReservation = async ({
   date,
   bookingId,
   customerId,
-  bookingSessionId,
   timeSlot,
 }) => {
   const interval = getSlotInterval(timeSlot);
@@ -113,7 +110,6 @@ const getOwnedActiveRoomSlotReservation = async ({
         reservation.booking.toString() === bookingId.toString() &&
         (!reservation.customer ||
           (customerId && reservation.customer.toString() === customerId.toString())) &&
-        reservation.bookingSessionId === bookingSessionId &&
         reservation.status === 'pending' &&
         reservation.expiresAt > now &&
         reservation.startMinute === interval.start &&
