@@ -289,6 +289,89 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
       .expect(201);
   });
 
+  it('renews an expired hold at booking submission when the slot remains available', async () => {
+    const holdId = new mongoose.Types.ObjectId().toString();
+    await request(app)
+      .post('/api/v1/bookings/hold')
+      .send({
+        theaterId: theater._id,
+        roomId: room._id,
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        timeSlotId: room.slots[0]._id,
+        duration: 1,
+        holdId,
+      })
+      .expect(201);
+
+    const day = await RoomSlotReservation.findOne({ room: room._id });
+    day.reservations[0].expiresAt = new Date(Date.now() - 1000);
+    await day.save();
+
+    const bookingRes = await request(app)
+      .post('/api/v1/bookings')
+      .send({
+        ...validBookingPayload,
+        theaterId: theater._id,
+        roomId: room._id,
+        eventTypeId: eventType._id,
+        slotHoldId: holdId,
+        timeSlotId: room.slots[0]._id,
+      })
+      .expect(201);
+
+    expect(bookingRes.body.data._id).toBe(holdId);
+    const renewedReservation = await RoomSlotReservation.findOne({ room: room._id });
+    expect(renewedReservation.reservations[0].expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('rejects renewal of an expired hold after another customer has reserved the slot', async () => {
+    const expiredHoldId = new mongoose.Types.ObjectId().toString();
+    await request(app)
+      .post('/api/v1/bookings/hold')
+      .send({
+        theaterId: theater._id,
+        roomId: room._id,
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        timeSlotId: room.slots[0]._id,
+        duration: 1,
+        holdId: expiredHoldId,
+      })
+      .expect(201);
+
+    const day = await RoomSlotReservation.findOne({ room: room._id });
+    day.reservations[0].expiresAt = new Date(Date.now() - 1000);
+    await day.save();
+
+    await request(app)
+      .post('/api/v1/bookings/hold')
+      .send({
+        theaterId: theater._id,
+        roomId: room._id,
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        timeSlotId: room.slots[0]._id,
+        duration: 1,
+        holdId: new mongoose.Types.ObjectId().toString(),
+      })
+      .expect(201);
+
+    const conflictingBooking = await request(app)
+      .post('/api/v1/bookings')
+      .send({
+        ...validBookingPayload,
+        theaterId: theater._id,
+        roomId: room._id,
+        eventTypeId: eventType._id,
+        slotHoldId: expiredHoldId,
+        timeSlotId: room.slots[0]._id,
+      })
+      .expect(409);
+
+    expect(conflictingBooking.body.message).toMatch(/booked|slot/i);
+  });
+
   it('2. The slot appears as Temporarily Reserved, not Sold Out, while hold is active', async () => {
     // Create hold for Customer A
     await request(app)

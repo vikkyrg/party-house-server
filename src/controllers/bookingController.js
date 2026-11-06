@@ -33,7 +33,6 @@ const {
 const { cleanupExpiredBookings } = require('../services/bookingExpiryService');
 const {
   reserveRoomSlot,
-  getOwnedActiveRoomSlotReservation,
   getActiveRoomSlotReservations,
   releaseRoomSlotReservation,
   confirmRoomSlotReservation,
@@ -406,35 +405,14 @@ exports.createBooking = catchAsync(async (req, res, next) => {
     : new mongoose.Types.ObjectId();
 
   try {
-    const activeHold = req.body.slotHoldId
-      ? await getOwnedActiveRoomSlotReservation({
-          roomId,
-          date: normalizedBookingDate,
-          bookingId: reservationBookingId,
-          customerId: req.user._id,
-          timeSlot,
-        })
-      : null;
-    const hasReservation = req.body.slotHoldId
-      ? Boolean(
-          activeHold &&
-            (await reserveRoomSlot({
-              roomId,
-              date: normalizedBookingDate,
-              bookingId: reservationBookingId,
-              customerId: req.user._id,
-              timeSlot,
-              expiresAt: holdExpiresAt,
-            }))
-        )
-      : await reserveRoomSlot({
-          roomId,
-          date: normalizedBookingDate,
-          bookingId: reservationBookingId,
-          customerId: req.user._id,
-          timeSlot,
-          expiresAt: holdExpiresAt,
-        });
+    const hasReservation = await reserveRoomSlot({
+      roomId,
+      date: normalizedBookingDate,
+      bookingId: reservationBookingId,
+      customerId: req.user._id,
+      timeSlot,
+      expiresAt: holdExpiresAt,
+    });
     if (!hasReservation) {
       if (useTransaction && session) {
         await session.abortTransaction();
