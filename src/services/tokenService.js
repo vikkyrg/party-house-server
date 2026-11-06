@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { clearBookingSessionCookie } = require('../middleware/bookingSession');
 
 const tokenBlacklist = new Set();
 
@@ -48,6 +49,7 @@ const setTokenCookies = (res, accessToken, refreshToken) => {
 const clearTokenCookies = (res) => {
   res.clearCookie('accessToken');
   res.clearCookie('refreshToken');
+  clearBookingSessionCookie(res);
 };
 
 module.exports = {

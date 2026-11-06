@@ -8,6 +8,8 @@ const BookingSchema = new mongoose.Schema(
       ref: 'User',
       required: [true, 'Booking must belong to a user'],
     },
+    bookingSessionId: { type: String, select: false },
+    draftId: { type: String, unique: true, sparse: true, select: false },
     theater: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Theater',
@@ -172,7 +174,23 @@ const BookingSchema = new mongoose.Schema(
     bulkBookingTotal: { type: Number },
     bulkBookingAdvance: { type: Number },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      transform: (_document, value) => {
+        delete value.bookingSessionId;
+        delete value.draftId;
+        return value;
+      },
+    },
+    toObject: {
+      transform: (_document, value) => {
+        delete value.bookingSessionId;
+        delete value.draftId;
+        return value;
+      },
+    },
+  }
 );
 
 BookingSchema.index({ theater: 1, date: 1 });

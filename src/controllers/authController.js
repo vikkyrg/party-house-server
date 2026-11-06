@@ -9,6 +9,7 @@ const tokenService = require('../services/tokenService');
 const { sendEmail } = require('../services/emailService');
 const { OTP_EXPIRY_MS } = require('../utils/constants');
 const { createAuditLog } = require('../services/auditService');
+const { setBookingSessionCookie } = require('../middleware/bookingSession');
 
 const sanitizeUser = (user) => ({
   id: user._id,
@@ -43,6 +44,7 @@ exports.register = catchAsync(async (req, res, next) => {
 
   const { accessToken, refreshToken } = tokenService.generateTokens(user._id);
   tokenService.setTokenCookies(res, accessToken, refreshToken);
+  setBookingSessionCookie(res);
 
   res.status(201).json({
     success: true,
@@ -106,6 +108,7 @@ exports.login = catchAsync(async (req, res, next) => {
 
   const { accessToken, refreshToken } = tokenService.generateTokens(user._id);
   tokenService.setTokenCookies(res, accessToken, refreshToken);
+  setBookingSessionCookie(res);
 
   await createAuditLog({
     user: user._id,

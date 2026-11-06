@@ -2,10 +2,13 @@ const express = require('express');
 const bookingController = require('../controllers/bookingController');
 const { protect, restrictTo } = require('../middleware/auth');
 const { resolveCustomerAuth } = require('../middleware/auth');
+const { ensureBookingSession } = require('../middleware/bookingSession');
 const validateRequest = require('../middleware/validateRequest');
 const {
   createBookingSchema,
   createBookingHoldSchema,
+  bookingDraftIdSchema,
+  saveBookingDraftSchema,
   cancelBookingSchema,
   checkAvailabilitySchema,
 } = require('../validators/bookingValidator');
@@ -29,6 +32,8 @@ const bookingLimiter = rateLimit({
 
 const router = express.Router();
 
+router.use(ensureBookingSession);
+
 router.get(
   '/check-availability',
   validateRequest(checkAvailabilitySchema, 'query'),
@@ -41,6 +46,26 @@ router.post(
   bookingLimiter,
   validateRequest(createBookingHoldSchema),
   bookingController.createBookingHold
+);
+
+router.delete('/hold/:holdId', bookingController.releaseBookingHold);
+
+router.get(
+  '/drafts/:draftId',
+  validateRequest(bookingDraftIdSchema, 'params'),
+  bookingController.getBookingDraft
+);
+router.put(
+  '/drafts/:draftId',
+  validateRequest(bookingDraftIdSchema, 'params'),
+  validateRequest(saveBookingDraftSchema),
+  resolveCustomerAuth,
+  bookingController.saveBookingDraft
+);
+router.delete(
+  '/drafts/:draftId',
+  validateRequest(bookingDraftIdSchema, 'params'),
+  bookingController.deleteBookingDraft
 );
 
 // Public / Guest / Customer booking creation endpoints (uses resolveCustomerAuth)
@@ -61,6 +86,8 @@ router.post(
   validateRequest(bulkBookingSchema),
   bookingController.createBulkBooking
 );
+
+router.get('/current-session', resolveCustomerAuth, bookingController.getCurrentSessionBooking);
 
 // Authenticated booking management routes
 router.use(protect);

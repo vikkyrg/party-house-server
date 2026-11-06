@@ -69,6 +69,29 @@ describe('POST /api/v1/auth/login', () => {
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.accessToken).toBeDefined();
+    expect(res.headers['set-cookie'].some((cookie) => cookie.startsWith('bookingSession='))).toBe(true);
+  });
+
+  it('clears the browser booking session on logout', async () => {
+    await User.create({
+      name: 'Logout User',
+      email: 'logout@example.com',
+      phone: '9876543214',
+      password: 'Test@1234',
+    });
+
+    const customerAgent = request.agent(app);
+    await customerAgent
+      .post('/api/v1/auth/login')
+      .send({ email: 'logout@example.com', password: 'Test@1234' })
+      .expect(200);
+
+    const logoutResponse = await customerAgent.post('/api/v1/auth/logout').expect(200);
+    expect(
+      logoutResponse.headers['set-cookie'].some(
+        (cookie) => cookie.startsWith('bookingSession=') && cookie.includes('Expires=')
+      )
+    ).toBe(true);
   });
 });
 

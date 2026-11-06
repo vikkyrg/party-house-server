@@ -1,6 +1,7 @@
 const Joi = require('joi');
 
 exports.createBookingSchema = Joi.object({
+  draftId: Joi.string().hex().length(32).optional(),
   theaterId: Joi.string().hex().length(24).required(),
   roomId: Joi.string().hex().length(24).required(),
   locationId: Joi.string().hex().length(24).optional(),
@@ -60,6 +61,43 @@ exports.createBookingHoldSchema = Joi.object({
   timeSlotId: Joi.string().hex().length(24).optional(),
   duration: Joi.number().integer().valid(1, 2, 3).required(),
   holdId: Joi.string().hex().length(24).optional(),
+});
+
+exports.bookingDraftIdSchema = Joi.object({
+  draftId: Joi.string().hex().length(32).required(),
+});
+
+exports.saveBookingDraftSchema = Joi.object({
+  selection: Joi.object({
+    theaterId: Joi.string().hex().length(24).required(),
+    roomId: Joi.string().hex().length(24).required(),
+    date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
+    timeSlot: Joi.string().required(),
+    timeSlotId: Joi.string().hex().length(24).allow('').default(''),
+    duration: Joi.number().integer().valid(1, 2, 3).required(),
+  }).required(),
+  currentStep: Joi.number().integer().min(1).max(5).required(),
+  customerDetails: Joi.object({
+    name: Joi.string().max(50).allow('').default(''),
+    phone: Joi.string().max(20).allow('').default(''),
+    email: Joi.string().email().allow('').default(''),
+    members: Joi.number().integer().min(1).default(1),
+    kids: Joi.number().integer().min(0).default(0),
+    specialRequest: Joi.string().max(500).allow('').default(''),
+  }).required(),
+  selectedEventType: Joi.string().hex().length(24).allow('').default(''),
+  selectedCake: Joi.object({
+    cakeId: Joi.string().hex().length(24).required(),
+    size: Joi.string().required(),
+    isEggless: Joi.boolean().default(false),
+  }).allow(null).default(null),
+  selectedAddons: Joi.object()
+    .pattern(
+      Joi.string().hex().length(24),
+      Joi.object({ quantity: Joi.number().integer().min(1).default(1) })
+    )
+    .default({}),
+  termsAccepted: Joi.boolean().default(false),
 });
 
 exports.bulkBookingSchema = Joi.object({

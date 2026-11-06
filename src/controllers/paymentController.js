@@ -23,7 +23,6 @@ const expireBookingHold = async (booking, now) => {
     cancellationReason: 'Booking reservation expired due to uncompleted advance payment within 10-minute hold window.',
     cancelledAt: now,
   };
-
   booking.status = expiryUpdate.status;
   booking.cancellationReason = expiryUpdate.cancellationReason;
   booking.cancelledAt = expiryUpdate.cancelledAt;
@@ -41,6 +40,16 @@ const expireBookingHold = async (booking, now) => {
       { $set: expiryUpdate }
     );
   }
+};
+
+const canAccessBooking = (req, booking) => {
+  if (req.isAuthenticated) {
+    return (
+      ['admin', 'super-admin'].includes(req.user?.role) ||
+      booking.user?.toString() === req.user?._id?.toString()
+    );
+  }
+  return Boolean(req.bookingSessionId && booking.bookingSessionId === req.bookingSessionId);
 };
 
 /**
@@ -68,18 +77,13 @@ exports.submitUpiPayment = catchAsync(async (req, res, next) => {
     return next(new AppError('Please enter a valid UPI transaction reference number (UTR/Ref No)', 400));
   }
 
-  const booking = await Booking.findById(bookingId);
+  const booking = await Booking.findById(bookingId).select('+bookingSessionId');
   if (!booking) {
     return next(new AppError('Booking not found', 404));
   }
 
   // Authorization check: must be owner or admin
-  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
-  if (
-    !req.user ||
-    (!isAdmin &&
-      (!booking.user || booking.user.toString() !== req.user._id.toString()))
-  ) {
+  if (!canAccessBooking(req, booking)) {
     return next(new AppError('Not authorized to update this booking', 403));
   }
 
@@ -250,15 +254,10 @@ exports.checkPaymentStatus = catchAsync(async (req, res, next) => {
     return next(new AppError('A valid booking ID is required.', 400));
   }
 
-  const booking = await Booking.findById(bookingId);
+  const booking = await Booking.findById(bookingId).select('+bookingSessionId');
   if (!booking) return next(new AppError('Booking not found', 404));
 
-  const isAdmin = ['admin', 'super-admin'].includes(req.user?.role);
-  if (
-    !req.user ||
-    (!isAdmin &&
-      (!booking.user || booking.user.toString() !== req.user._id.toString()))
-  ) {
+  if (!canAccessBooking(req, booking)) {
     return next(new AppError('Not authorized', 403));
   }
 
@@ -308,15 +307,13 @@ exports.checkPaymentStatus = catchAsync(async (req, res, next) => {
  */
 exports.getInvoice = catchAsync(async (req, res, next) => {
   const booking = await Booking.findById(req.params.id)
+    .select('+bookingSessionId')
     .populate('theater', 'name address')
     .populate('eventType', 'name');
 
   if (!booking) return next(new AppError('Booking not found', 404));
 
-  if (
-    booking.user.toString() !== req.user._id.toString() &&
-    !['admin', 'super-admin'].includes(req.user.role)
-  ) {
+  if (!canAccessBooking(req, booking)) {
     return next(new AppError('Not authorized', 403));
   }
 
