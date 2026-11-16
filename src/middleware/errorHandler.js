@@ -4,8 +4,20 @@ const logger = require('../utils/logger');
 const handleCastErrorDB = (err) => new AppError(`Invalid ${err.path}: ${err.value}`, 400);
 
 const handleDuplicateFieldsDB = (err) => {
-  const field = Object.keys(err.keyValue || {})[0];
-  return new AppError(`Duplicate field value: ${field}. Please use another value.`, 400);
+  const keyValue = err.keyValue || {};
+  const field = Object.keys(keyValue)[0] || 'field';
+  const val = keyValue[field];
+
+  if (field === '_id') {
+    return new AppError('A booking with this identifier already exists. Please refresh and try again.', 400);
+  }
+  if (field === 'bookingId') {
+    return new AppError('A booking reference conflict occurred. Please submit again.', 400);
+  }
+  if (field === 'paymentRecords.transactionReferenceNormalized') {
+    return new AppError('This transaction reference / UTR has already been submitted.', 400);
+  }
+  return new AppError(`Duplicate field value: ${field}${val ? ` (${val})` : ''}. Please use another value.`, 400);
 };
 
 const handleValidationErrorDB = (err) => {

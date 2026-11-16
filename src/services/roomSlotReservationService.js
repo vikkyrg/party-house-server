@@ -205,12 +205,23 @@ const migrateLegacyBookingIndex = async () => {
   }
 };
 
+const replaceRoomSlotReservationBookingId = async ({ roomId, date, oldBookingId, newBookingId }) => {
+  if (!roomId || !date || !oldBookingId || !newBookingId) return;
+  const oldId = new mongoose.Types.ObjectId(oldBookingId);
+  const newId = new mongoose.Types.ObjectId(newBookingId);
+  await RoomSlotReservation.updateOne(
+    { room: roomId, date, 'reservations.booking': oldId },
+    { $set: { 'reservations.$.booking': newId } }
+  );
+};
+
 module.exports = {
   reserveRoomSlot,
   getOwnedActiveRoomSlotReservation,
   getActiveRoomSlotReservations,
   releaseRoomSlotReservation,
   confirmRoomSlotReservation,
+  replaceRoomSlotReservationBookingId,
   cleanupExpiredRoomSlotReservations,
   migrateLegacyBookingIndex,
 };

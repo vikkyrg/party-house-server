@@ -36,6 +36,7 @@ const {
   getActiveRoomSlotReservations,
   releaseRoomSlotReservation,
   confirmRoomSlotReservation,
+  replaceRoomSlotReservationBookingId,
 } = require('../services/roomSlotReservationService');
 
 exports.createBookingHold = catchAsync(async (req, res, next) => {
@@ -400,15 +401,24 @@ exports.createBooking = catchAsync(async (req, res, next) => {
   const balanceAmount = total;
   const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
   const expiresAt = holdExpiresAt;
-  const reservationBookingId = req.body.slotHoldId
+  const slotHoldObjectId = req.body.slotHoldId && mongoose.isValidObjectId(req.body.slotHoldId)
     ? new mongoose.Types.ObjectId(req.body.slotHoldId)
-    : new mongoose.Types.ObjectId();
+    : null;
+
+  // Check if a Booking with this ID already exists
+  let bookingIdToUse = new mongoose.Types.ObjectId();
+  if (slotHoldObjectId) {
+    const existingDocWithHoldId = await Booking.findById(slotHoldObjectId);
+    if (!existingDocWithHoldId) {
+      bookingIdToUse = slotHoldObjectId;
+    }
+  }
 
   try {
     const hasReservation = await reserveRoomSlot({
       roomId,
       date: normalizedBookingDate,
-      bookingId: reservationBookingId,
+      bookingId: bookingIdToUse,
       customerId: req.user._id,
       timeSlot,
       expiresAt: holdExpiresAt,
@@ -421,8 +431,17 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       return next(new AppError('This time slot has just been booked. Please select another available slot.', 409));
     }
 
+    if (slotHoldObjectId && !slotHoldObjectId.equals(bookingIdToUse)) {
+      await replaceRoomSlotReservationBookingId({
+        roomId,
+        date: normalizedBookingDate,
+        oldBookingId: slotHoldObjectId,
+        newBookingId: bookingIdToUse,
+      });
+    }
+
     const createdBookings = await Booking.create([{
-      _id: reservationBookingId,
+      _id: bookingIdToUse,
       user: req.user._id,
       theater: theaterId,
       theaterName: theater.name,
@@ -475,7 +494,7 @@ exports.createBooking = catchAsync(async (req, res, next) => {
       await session.abortTransaction();
       session.endSession();
     }
-    await releaseRoomSlotReservation({ _id: reservationBookingId, room: roomId, date: normalizedBookingDate });
+    await releaseRoomSlotReservation({ _id: bookingIdToUse, room: roomId, date: normalizedBookingDate });
     throw error;
   }
 
