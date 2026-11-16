@@ -6,6 +6,7 @@ const File = require('../models/File');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const { deleteFromCloudinary } = require('../services/fileService');
+const { getActiveRoomSlotReservations } = require('../services/roomSlotReservationService');
 const {
   uploadToGridFS,
   getGridFSFileById,
@@ -142,6 +143,7 @@ exports.getRoom = catchAsync(async (req, res, next) => {
 
 const {
   doesOverlap,
+  getSlotInterval,
   normalizeBookingDate,
   getActiveBookingsFilter,
 } = require('../utils/dateUtils');
@@ -159,22 +161,38 @@ exports.getAvailability = catchAsync(async (req, res, next) => {
     date: bookingDate,
   });
 
-  const booked = await Booking.find(filter).select('timeSlot status payment duration expiresAt');
+  const [booked, activeReservations] = await Promise.all([
+    Booking.find(filter).select('timeSlot status payment duration expiresAt'),
+    getActiveRoomSlotReservations(room._id, bookingDate),
+  ]);
 
   const slots = (room.slots || [])
     .filter((slot) => slot.isActive !== false)
     .map((slot) => {
       const time = `${slot.startTime} - ${slot.endTime}`;
       const conflictingBooking = booked.find((b) => doesOverlap(b.timeSlot, time));
+      const interval = getSlotInterval(time);
+      const conflictingReservation = activeReservations.find(
+        (reservation) =>
+          interval &&
+          reservation.startMinute < interval.end &&
+          reservation.endMinute > interval.start
+      );
+      const isBooked = Boolean(conflictingBooking || conflictingReservation);
+      const isConfirmed =
+        ['confirmed', 'in-progress', 'completed'].includes(conflictingBooking?.status) ||
+        conflictingBooking?.payment?.status === 'paid' ||
+        conflictingReservation?.status === 'confirmed';
+      const isTemporarilyHeld = isBooked && !isConfirmed;
 
       return {
         _id: slot._id,
         startTime: slot.startTime,
         endTime: slot.endTime,
         time,
-        available: !conflictingBooking,
-        isTemporarilyHeld: conflictingBooking?.status === 'pending',
-        slotState: conflictingBooking ? (conflictingBooking.status === 'pending' ? 'held' : 'booked') : 'available',
+        available: !isBooked,
+        isTemporarilyHeld: Boolean(isTemporarilyHeld),
+        slotState: !isBooked ? 'available' : isTemporarilyHeld ? 'held' : 'booked',
       };
     });
 

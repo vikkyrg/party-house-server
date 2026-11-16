@@ -217,6 +217,33 @@ describe('10-Minute Temporary Booking Hold and Expiration Integration Tests', ()
     );
   });
 
+  it('includes pre-booking holds in room availability', async () => {
+    await request(app)
+      .post('/api/v1/bookings/hold')
+      .send({
+        theaterId: theater._id,
+        roomId: room._id,
+        date: futureBookingDate,
+        timeSlot: validBookingPayload.timeSlot,
+        timeSlotId: room.slots[0]._id,
+        duration: 1,
+        holdId: new mongoose.Types.ObjectId().toString(),
+      })
+      .expect(201);
+
+    const availability = await request(app)
+      .get(`/api/rooms/${room._id}/availability`)
+      .query({ date: futureBookingDate })
+      .expect(200);
+    const heldSlot = availability.body.data.slots.find(
+      (slot) => slot.time === validBookingPayload.timeSlot
+    );
+
+    expect(heldSlot.available).toBe(false);
+    expect(heldSlot.slotState).toBe('held');
+    expect(heldSlot.isTemporarilyHeld).toBe(true);
+  });
+
   it('returns 404 for a room that is not present in the selected theater', async () => {
     await request(app)
       .post('/api/v1/bookings/hold')
